@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+.env
+.pytest_cache/
+*.db
+*.db-shm
+*.db-wal
+examples/claude-code/.claude/memory/pane.db
+examples/claude-code/.claude/memory/turn.json
+examples/claude-code/.claude/memory/*.log
+examples/claude-code/.claude/memory/stats.json

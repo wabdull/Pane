@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 950 950" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <linearGradient id="pg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed"/>
+      <stop offset="100%" style="stop-color:#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="gg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981"/>
+      <stop offset="100%" style="stop-color:#34d399"/>
+    </linearGradient>
+    <linearGradient id="og" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f59e0b"/>
+      <stop offset="100%" style="stop-color:#f97316"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="950" height="950" rx="12" fill="#0f0f14"/>
+
+  <!-- Title -->
+  <text x="475" y="38" text-anchor="middle" fill="#e2e8f0" font-size="22" font-weight="700">Pane — Context Window Manager</text>
+  <text x="475" y="58" text-anchor="middle" fill="#94a3b8" font-size="12">Not a memory system. A context manager that gives you memory for free.</text>
+
+  <!-- ============ CONTEXT WINDOW ============ -->
+
+  <rect x="150" y="80" width="650" height="290" rx="14" fill="#1e1e2e" stroke="url(#pg)" stroke-width="2"/>
+  <text x="475" y="105" text-anchor="middle" fill="#c4b5fd" font-size="15" font-weight="700">Context Window</text>
+  <text x="475" y="122" text-anchor="middle" fill="#94a3b8" font-size="10">Kept small. Only what's relevant right now. Never compacts.</text>
+
+  <!-- Permanent layer — just identity + directives -->
+  <rect x="175" y="138" width="600" height="45" rx="8" fill="#0f0f14" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="475" y="158" text-anchor="middle" fill="#a5b4fc" font-size="12" font-weight="700">Always Loaded (~500 tokens)</text>
+  <rect x="190" y="165" width="180" height="14" rx="3" fill="#1e1b4b"/>
+  <text x="280" y="175" text-anchor="middle" fill="#c4b5fd" font-size="8">User identity: name, role</text>
+  <rect x="385" y="165" width="380" height="14" rx="3" fill="#1e1b4b"/>
+  <text x="575" y="175" text-anchor="middle" fill="#c4b5fd" font-size="8">Directives: preferences, rules ("use const not var", "prefer Tailwind")</text>
+
+  <!-- Current conversation -->
+  <rect x="175" y="193" width="600" height="50" rx="6" fill="#0f0f14" stroke="#3b82f6" stroke-width="1"/>
+  <text x="475" y="215" text-anchor="middle" fill="#60a5fa" font-size="11" font-weight="600">Current Conversation</text>
+  <text x="475" y="232" text-anchor="middle" fill="#94a3b8" font-size="9">User: "How's the pricing page coming?" AI: "I'll adjust the Pro tier..."</text>
+
+  <!-- Loaded topic summaries -->
+  <rect x="175" y="253" width="600" height="105" rx="8" fill="#0f0f14" stroke="#10b981" stroke-width="1.5"/>
+  <text x="475" y="275" text-anchor="middle" fill="#34d399" font-size="11" font-weight="600">Loaded On Demand (summaries, not raw messages)</text>
+  <text x="475" y="290" text-anchor="middle" fill="#6b7280" font-size="9">Topics + facts load when referenced, unload when stale. Everything is in the DB.</text>
+
+  <rect x="190" y="300" width="180" height="48" rx="5" fill="#022c22" stroke="#10b981" stroke-width="1"/>
+  <text x="280" y="317" text-anchor="middle" fill="#34d399" font-size="10" font-weight="600">Pricing Design</text>
+  <text x="280" y="330" text-anchor="middle" fill="#94a3b8" font-size="8">"3 tiers: Free, Pro $7.99, Team $14.99"</text>
+  <text x="280" y="342" text-anchor="middle" fill="#10b981" font-size="8">TTL: 5 | ~50 tokens</text>
+
+  <rect x="385" y="300" width="180" height="48" rx="5" fill="#022c22" stroke="#f59e0b" stroke-width="1"/>
+  <text x="475" y="317" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="600">mom: Chen Meiling</text>
+  <text x="475" y="330" text-anchor="middle" fill="#94a3b8" font-size="8">"knee problems, visiting May 15"</text>
+  <text x="475" y="342" text-anchor="middle" fill="#f59e0b" font-size="8">TTL: 2 | ~30 tokens</text>
+
+  <rect x="580" y="300" width="180" height="48" rx="5" fill="#1a0a0a" stroke="#ef4444" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="670" y="317" text-anchor="middle" fill="#f87171" font-size="10" font-weight="600">Hero Animation</text>
+  <text x="670" y="330" text-anchor="middle" fill="#94a3b8" font-size="8">"CSS keyframes, purple to blue"</text>
+  <text x="670" y="342" text-anchor="middle" fill="#ef4444" font-size="8">TTL: 0 — UNLOADING</text>
+
+  <!-- User + LLM -->
+  <rect x="30" y="160" width="100" height="45" rx="8" fill="#1e1e2e" stroke="#6366f1" stroke-width="1"/>
+  <text x="80" y="187" text-anchor="middle" fill="#e2e8f0" font-size="12" font-weight="600">User</text>
+  <line x1="130" y1="182" x2="150" y2="182" stroke="#6366f1" stroke-width="1.5"/>
+
+  <rect x="820" y="160" width="100" height="45" rx="8" fill="#1e1e2e" stroke="#3b82f6" stroke-width="1"/>
+  <text x="870" y="180" text-anchor="middle" fill="#e2e8f0" font-size="12" font-weight="600">Any LLM</text>
+  <text x="870" y="194" text-anchor="middle" fill="#94a3b8" font-size="8">Claude/GPT/etc</text>
+  <line x1="800" y1="182" x2="820" y2="182" stroke="#3b82f6" stroke-width="1.5"/>
+
+  <!-- ============ ARROWS ============ -->
+
+  <path d="M350,358 L350,430" fill="none" stroke="#10b981" stroke-width="2"/>
+  <polygon points="346,428 350,438 354,428" fill="#10b981"/>
+  <rect x="245" y="390" width="110" height="24" rx="5" fill="#10b981" opacity="0.15"/>
+  <text x="300" y="406" text-anchor="middle" fill="#10b981" font-size="10" font-weight="600">LOAD summary</text>
+
+  <path d="M475,358 L475,430" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <polygon points="471,428 475,438 479,428" fill="#3b82f6"/>
+  <rect x="400" y="390" width="145" height="24" rx="5" fill="#3b82f6" opacity="0.15"/>
+  <text x="472" y="406" text-anchor="middle" fill="#60a5fa" font-size="10" font-weight="600">NEED MORE? load raw</text>
+
+  <path d="M600,358 L600,430" fill="none" stroke="#f59e0b" stroke-width="2"/>
+  <polygon points="596,428 600,438 604,428" fill="#f59e0b"/>
+  <rect x="545" y="390" width="110" height="24" rx="5" fill="#f59e0b" opacity="0.15"/>
+  <text x="600" y="406" text-anchor="middle" fill="#f59e0b" font-size="10" font-weight="600">STORE turn</text>
+
+  <!-- ============ DATABASE ============ -->
+
+  <rect x="100" y="445" width="750" height="195" rx="14" fill="#1e1e2e" stroke="url(#gg)" stroke-width="1.5"/>
+  <text x="475" y="472" text-anchor="middle" fill="#34d399" font-size="15" font-weight="700">Memory DB — Everything, Forever</text>
+  <text x="475" y="492" text-anchor="middle" fill="#94a3b8" font-size="10">Summary = default load (~50 tokens). Raw messages = on demand (full detail).</text>
+
+  <rect x="120" y="508" width="170" height="60" rx="6" fill="#0f0f14" stroke="#374151" stroke-width="1"/>
+  <text x="205" y="525" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="600">Pricing Design</text>
+  <text x="205" y="539" text-anchor="middle" fill="#34d399" font-size="8">summary: "3 tiers, annual toggle..."</text>
+  <text x="205" y="552" text-anchor="middle" fill="#6b7280" font-size="8">raw: 15K tokens (14 messages)</text>
+  <text x="205" y="563" text-anchor="middle" fill="#475569" font-size="7">entity:pricing  cat:design</text>
+
+  <rect x="305" y="508" width="170" height="60" rx="6" fill="#0f0f14" stroke="#374151" stroke-width="1"/>
+  <text x="390" y="525" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="600">Basel's Surgery</text>
+  <text x="390" y="539" text-anchor="middle" fill="#34d399" font-size="8">summary: "ACL torn, surgery Apr 15"</text>
+  <text x="390" y="552" text-anchor="middle" fill="#6b7280" font-size="8">raw: 3K tokens (4 messages)</text>
+  <text x="390" y="563" text-anchor="middle" fill="#475569" font-size="7">entity:basel  cat:health</text>
+
+  <rect x="490" y="508" width="170" height="60" rx="6" fill="#0f0f14" stroke="#374151" stroke-width="1"/>
+  <text x="575" y="525" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="600">Mom's Visit</text>
+  <text x="575" y="539" text-anchor="middle" fill="#34d399" font-size="8">summary: "Chen Meiling, May 15-Jun 2"</text>
+  <text x="575" y="552" text-anchor="middle" fill="#6b7280" font-size="8">raw: 2K tokens (3 messages)</text>
+  <text x="575" y="563" text-anchor="middle" fill="#475569" font-size="7">entity:mom  cat:family</text>
+
+  <rect x="675" y="508" width="155" height="60" rx="6" fill="#0f0f14" stroke="#374151" stroke-width="1"/>
+  <text x="752" y="530" text-anchor="middle" fill="#94a3b8" font-size="10">+ 47 more...</text>
+  <text x="752" y="548" text-anchor="middle" fill="#6b7280" font-size="8">all searchable</text>
+  <text x="752" y="562" text-anchor="middle" fill="#6b7280" font-size="8">none in context</text>
+
+  <!-- Entity + Fact rows -->
+  <rect x="120" y="580" width="345" height="45" rx="6" fill="#0f0f14" stroke="#6366f1" stroke-width="1"/>
+  <text x="292" y="597" text-anchor="middle" fill="#a5b4fc" font-size="10" font-weight="600">Entities (for tag matching)</text>
+  <text x="292" y="614" text-anchor="middle" fill="#94a3b8" font-size="8">mom | basel | amazon | pricing | obsidian | omar | ...</text>
+
+  <rect x="485" y="580" width="345" height="45" rx="6" fill="#0f0f14" stroke="#f59e0b" stroke-width="1"/>
+  <text x="657" y="597" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="600">Facts (loaded on match, not always)</text>
+  <text x="657" y="614" text-anchor="middle" fill="#94a3b8" font-size="8">commute: 35min | dog: golden retriever | projects: 4 | ...</text>
+
+  <!-- ============ SPEAKER METADATA ============ -->
+
+  <rect x="100" y="665" width="750" height="115" rx="14" fill="#1e1e2e" stroke="url(#og)" stroke-width="1.5"/>
+  <text x="475" y="690" text-anchor="middle" fill="#fbbf24" font-size="15" font-weight="700">Speaker Emits (free, piggybacking on response)</text>
+
+  <rect x="120" y="705" width="340" height="60" rx="8" fill="#0f0f14" stroke="#f59e0b" stroke-width="1"/>
+  <text x="290" y="722" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="600">Every Turn (~20 tokens)</text>
+  <text x="290" y="738" text-anchor="middle" fill="#94a3b8" font-size="9">entities: ["Mom", "Dr. Chen"]</text>
+  <text x="290" y="751" text-anchor="middle" fill="#94a3b8" font-size="9">categories: ["health", "family"]</text>
+  <text x="290" y="764" text-anchor="middle" fill="#94a3b8" font-size="9">facts: ["mom's knee: needs PT"]</text>
+
+  <rect x="490" y="705" width="340" height="60" rx="8" fill="#0f0f14" stroke="#10b981" stroke-width="1.5"/>
+  <text x="660" y="722" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">On Topic Shift / Resolution</text>
+  <text x="660" y="738" text-anchor="middle" fill="#94a3b8" font-size="9">+ summary: "Built 3-tier pricing with</text>
+  <text x="660" y="751" text-anchor="middle" fill="#94a3b8" font-size="9">annual toggle. Pro $7.99 highlighted."</text>
+  <text x="660" y="764" text-anchor="middle" fill="#34d399" font-size="9" font-weight="600">50 tokens replaces 15K of raw messages</text>
+
+  <!-- ============ BOTTOM COMPARISON ============ -->
+
+  <rect x="100" y="800" width="750" height="135" rx="14" fill="#1e1e2e" stroke="#374151" stroke-width="1"/>
+  <text x="475" y="828" text-anchor="middle" fill="#e2e8f0" font-size="14" font-weight="700">No Keywords. No Embeddings. No Compaction. No Waste.</text>
+
+  <text x="240" y="855" text-anchor="middle" fill="#ef4444" font-size="12" font-weight="600">Killed</text>
+  <text x="240" y="873" text-anchor="middle" fill="#94a3b8" font-size="9">Keyword extraction (noisy)</text>
+  <text x="240" y="887" text-anchor="middle" fill="#94a3b8" font-size="9">Embeddings (proven 46% ceiling)</text>
+  <text x="240" y="901" text-anchor="middle" fill="#94a3b8" font-size="9">LLM retrieval calls ($$$)</text>
+  <text x="240" y="915" text-anchor="middle" fill="#94a3b8" font-size="9">Compaction (lossy + expensive)</text>
+
+  <text x="475" y="855" text-anchor="middle" fill="#10b981" font-size="12" font-weight="600">Kept</text>
+  <text x="475" y="873" text-anchor="middle" fill="#94a3b8" font-size="9">Entity + category tags (speaker emits free)</text>
+  <text x="475" y="887" text-anchor="middle" fill="#94a3b8" font-size="9">Facts (loaded on match, not always)</text>
+  <text x="475" y="901" text-anchor="middle" fill="#94a3b8" font-size="9">Summaries on resolution (50 vs 15K tokens)</text>
+  <text x="475" y="915" text-anchor="middle" fill="#94a3b8" font-size="9">TTL topic management (auto load/unload)</text>
+
+  <text x="710" y="855" text-anchor="middle" fill="#60a5fa" font-size="12" font-weight="600">Result</text>
+  <text x="710" y="873" text-anchor="middle" fill="#94a3b8" font-size="9">Context always lean</text>
+  <text x="710" y="887" text-anchor="middle" fill="#94a3b8" font-size="9">~20 token overhead per turn</text>
+  <text x="710" y="901" text-anchor="middle" fill="#94a3b8" font-size="9">Nothing ever lost</text>
+  <text x="710" y="915" text-anchor="middle" fill="#94a3b8" font-size="9">Works with any LLM provider</text>
+</svg>
