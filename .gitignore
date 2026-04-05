@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -6,10 +7,27 @@ build/
 .venv/
 .env
 .pytest_cache/
+
+# SQLite
 *.db
 *.db-shm
 *.db-wal
+
+# Pane runtime artifacts
 examples/claude-code/.claude/memory/pane.db
 examples/claude-code/.claude/memory/turn.json
 examples/claude-code/.claude/memory/*.log
 examples/claude-code/.claude/memory/stats.json
+
+# Eval run outputs
+evals/results/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+docs/

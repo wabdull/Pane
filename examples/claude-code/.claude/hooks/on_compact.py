@@ -9,10 +9,28 @@ import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'src'))
 
-from pane.schema import create_db, get_all_topics, get_facts, get_all_entities
+from pane.schema import (
+    USER_ENTITY,
+    create_db,
+    get_all_entities,
+    get_all_topics,
+    get_entity_facts,
+)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'memory', 'pane.db')
 STATS_PATH = os.path.join(os.path.dirname(__file__), '..', 'memory', 'stats.json')
+LOG_PATH = os.path.join(os.path.dirname(__file__), '..', 'memory', 'pane.log')
+
+
+def log_error(hook_name):
+    import traceback
+    import datetime
+    try:
+        with open(LOG_PATH, 'a', encoding='utf-8') as f:
+            f.write(f"\n{datetime.datetime.now().isoformat()} [{hook_name}]\n")
+            f.write(traceback.format_exc())
+    except Exception:
+        pass
 
 
 def update_stats(**kwargs):
@@ -36,19 +54,19 @@ def main():
         return
 
     db = create_db(DB_PATH)
-    facts = get_facts(db)
+    user_facts = get_entity_facts(db, USER_ENTITY)
     topics = get_all_topics(db)
-    entities = [e for e in get_all_entities(db) if e['type'] not in ('fact', 'category')]
+    entities = [e for e in get_all_entities(db) if e['type'] != 'category']
     db.close()
 
-    lines = ["[PANE MEMORY — survived compaction]",
+    lines = ["[PANE MEMORY - survived compaction]",
              "Your memory system has stored information from previous turns.",
              "The recall hook will load relevant context automatically when needed.", ""]
 
-    if facts:
-        lines.append("Known facts:")
-        for name, value in facts.items():
-            lines.append(f"  - {name}: {value}")
+    if user_facts:
+        lines.append("User facts:")
+        for key, value in user_facts:
+            lines.append(f"  - {key}: {value}")
         lines.append("")
 
     if topics:
@@ -74,4 +92,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception:
+        log_error("on_compact")
         print(json.dumps({}))

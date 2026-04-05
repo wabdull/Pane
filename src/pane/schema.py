@@ -1,16 +1,21 @@
 """SQLite schema and CRUD for Pane.
 
-One DB per user. Four tables:
+One DB per user. Seven tables:
   - messages: raw conversation turns, append-only
   - topics: groups of messages with title, summary, and message range
   - topic_tags: entity/category tags on topics (for retrieval)
-  - entities: registry of people, places, tools, facts
+  - entities: registry of people, places, tools, categories
+  - entity_facts: key/value facts attached to an entity
+  - loaded_topics: ephemeral TTL state — which topics are in the window
+  - active_entities: ephemeral hard-switch set — whose facts are loaded right now
 """
 
 import sqlite3
 import json
 import uuid
-from datetime import datetime, timezone
+
+DEFAULT_TTL = 5
+USER_ENTITY = "user"  # facts attached here are always loaded
 
 
 def create_db(path):
@@ -46,14 +51,30 @@ def create_db(path):
         CREATE TABLE IF NOT EXISTS entities (
             name TEXT PRIMARY KEY,
             type TEXT NOT NULL DEFAULT 'unknown',
-            aliases TEXT NOT NULL DEFAULT '[]',
-            value TEXT NOT NULL DEFAULT ''
+            aliases TEXT NOT NULL DEFAULT '[]'
+        );
+
+        CREATE TABLE IF NOT EXISTS entity_facts (
+            entity_name TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (entity_name, key)
+        );
+
+        CREATE TABLE IF NOT EXISTS loaded_topics (
+            topic_id TEXT PRIMARY KEY,
+            ttl INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS active_entities (
+            entity_name TEXT PRIMARY KEY
         );
 
         CREATE INDEX IF NOT EXISTS idx_messages_window ON messages(window_id);
         CREATE INDEX IF NOT EXISTS idx_topics_window ON topics(window_id);
         CREATE INDEX IF NOT EXISTS idx_topic_tag ON topic_tags(tag);
         CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
+        CREATE INDEX IF NOT EXISTS idx_entity_facts_name ON entity_facts(entity_name);
     """)
 
     db.commit()
@@ -136,7 +157,7 @@ def get_topics_by_tags(db, tags):
 
 # ── Entities ──────────────────────────────────────────────────
 
-def save_entity(db, name, entity_type="unknown", aliases=None, value=""):
+def save_entity(db, name, entity_type="unknown", aliases=None):
     """Create or update an entity. Merges aliases."""
     name_lower = name.lower().strip()
     if not name_lower or len(name_lower) < 2:
@@ -147,21 +168,15 @@ def save_entity(db, name, entity_type="unknown", aliases=None, value=""):
         old_aliases = set(json.loads(existing["aliases"]))
         new_aliases = old_aliases | {a.lower().strip() for a in (aliases or [])}
         db.execute(
-            "UPDATE entities SET aliases = ?, value = CASE WHEN ? != '' THEN ? ELSE value END WHERE name = ?",
-            (json.dumps(sorted(new_aliases)), value, value, name_lower)
+            "UPDATE entities SET aliases = ? WHERE name = ?",
+            (json.dumps(sorted(new_aliases)), name_lower)
         )
     else:
         alias_list = sorted({a.lower().strip() for a in (aliases or [name_lower])})
         db.execute(
-            "INSERT INTO entities (name, type, aliases, value) VALUES (?, ?, ?, ?)",
-            (name_lower, entity_type, json.dumps(alias_list), value)
+            "INSERT INTO entities (name, type, aliases) VALUES (?, ?, ?)",
+            (name_lower, entity_type, json.dumps(alias_list))
         )
-
-
-def get_facts(db):
-    """Get all fact-type entities. Returns dict of name -> value."""
-    rows = db.execute("SELECT name, value FROM entities WHERE type = 'fact' AND value != ''").fetchall()
-    return {r["name"]: r["value"] for r in rows}
 
 
 def get_all_entities(db):
@@ -187,3 +202,145 @@ def build_alias_map(db):
 def create_window(db):
     """Create a new context window. Returns window ID."""
     return str(uuid.uuid4())
+
+
+# ── TTL / Loaded Topics ───────────────────────────────────────
+
+def tick_ttl(db, referenced_ids, max_ttl=DEFAULT_TTL):
+    """Advance the loaded-topics clock by one turn.
+
+    Matched topics reset to max_ttl. All others decrement. Zero-TTL rows unload.
+    Returns the list of topic_ids still loaded, highest TTL first.
+    """
+    referenced = [t for t in (referenced_ids or []) if t]
+
+    # Decrement non-matched rows first (so matched rows don't get double-hit)
+    if referenced:
+        placeholders = ",".join("?" for _ in referenced)
+        db.execute(
+            f"UPDATE loaded_topics SET ttl = ttl - 1 WHERE topic_id NOT IN ({placeholders})",
+            referenced
+        )
+    else:
+        db.execute("UPDATE loaded_topics SET ttl = ttl - 1")
+
+    # Reset / set matched topics to max_ttl
+    for tid in referenced:
+        db.execute(
+            "INSERT INTO loaded_topics (topic_id, ttl) VALUES (?, ?) "
+            "ON CONFLICT(topic_id) DO UPDATE SET ttl = excluded.ttl",
+            (tid, max_ttl)
+        )
+
+    # Unload expired
+    db.execute("DELETE FROM loaded_topics WHERE ttl <= 0")
+    db.commit()
+
+    return get_loaded_topic_ids(db)
+
+
+def mark_loaded(db, topic_id, max_ttl=DEFAULT_TTL):
+    """Explicitly load a topic into the context window (TTL = max_ttl)."""
+    db.execute(
+        "INSERT INTO loaded_topics (topic_id, ttl) VALUES (?, ?) "
+        "ON CONFLICT(topic_id) DO UPDATE SET ttl = excluded.ttl",
+        (topic_id, max_ttl)
+    )
+    db.commit()
+
+
+def get_loaded_topic_ids(db):
+    """Return currently-loaded topic IDs, highest TTL first."""
+    rows = db.execute(
+        "SELECT topic_id FROM loaded_topics ORDER BY ttl DESC"
+    ).fetchall()
+    return [r["topic_id"] for r in rows]
+
+
+def get_loaded_topics_with_ttl(db):
+    """Return list of (topic_id, ttl), highest TTL first. For debugging/stats."""
+    rows = db.execute(
+        "SELECT topic_id, ttl FROM loaded_topics ORDER BY ttl DESC"
+    ).fetchall()
+    return [(r["topic_id"], r["ttl"]) for r in rows]
+
+
+# ── Entity Facts ──────────────────────────────────────────────
+
+def save_entity_fact(db, entity_name, key, value):
+    """Attach a fact to an entity. Upserts on (entity_name, key)."""
+    entity = (entity_name or "").lower().strip()
+    k = (key or "").strip()
+    v = (value or "").strip()
+    if not entity or not k or not v:
+        return
+    db.execute(
+        "INSERT INTO entity_facts (entity_name, key, value) VALUES (?, ?, ?) "
+        "ON CONFLICT(entity_name, key) DO UPDATE SET value = excluded.value",
+        (entity, k, v)
+    )
+    db.commit()
+
+
+def get_entity_facts(db, entity_name):
+    """Return list of (key, value) facts for a single entity."""
+    rows = db.execute(
+        "SELECT key, value FROM entity_facts WHERE entity_name = ? ORDER BY key",
+        ((entity_name or "").lower().strip(),)
+    ).fetchall()
+    return [(r["key"], r["value"]) for r in rows]
+
+
+def get_facts_for_entities(db, entity_names):
+    """Return {entity_name: [(key, value), ...]} for the given entities."""
+    if not entity_names:
+        return {}
+    names = [(n or "").lower().strip() for n in entity_names if n]
+    names = [n for n in names if n]
+    if not names:
+        return {}
+    placeholders = ",".join("?" for _ in names)
+    rows = db.execute(
+        f"SELECT entity_name, key, value FROM entity_facts "
+        f"WHERE entity_name IN ({placeholders}) ORDER BY entity_name, key",
+        names
+    ).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(r["entity_name"], []).append((r["key"], r["value"]))
+    return out
+
+
+# ── Active Entities (hard-switch set) ─────────────────────────
+
+def set_active_entities(db, entity_names):
+    """Replace the active entity set. Does nothing if entity_names is empty
+    (preserves previous active set — "sticky" behavior).
+    The user entity is NEVER included here; its facts are always loaded
+    unconditionally.
+    """
+    names = [(n or "").lower().strip() for n in (entity_names or [])]
+    names = [n for n in names if n and n != USER_ENTITY]
+    if not names:
+        return
+    db.execute("DELETE FROM active_entities")
+    for name in names:
+        db.execute(
+            "INSERT OR IGNORE INTO active_entities (entity_name) VALUES (?)",
+            (name,)
+        )
+    db.commit()
+
+
+def clear_active_entities(db):
+    """Drop all active entities (no domain context)."""
+    db.execute("DELETE FROM active_entities")
+    db.commit()
+
+
+def get_active_entities(db):
+    """Return list of currently-active entity names."""
+    rows = db.execute(
+        "SELECT entity_name FROM active_entities ORDER BY entity_name"
+    ).fetchall()
+    return [r["entity_name"] for r in rows]

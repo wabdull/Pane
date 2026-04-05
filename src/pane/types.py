@@ -9,7 +9,7 @@ class Metadata:
     """Speaker-emitted metadata alongside a response."""
     entities: list[str] = field(default_factory=list)
     categories: list[str] = field(default_factory=list)
-    facts: list[str] = field(default_factory=list)  # "key: value" format
+    facts: list[dict] = field(default_factory=list)  # [{entity, key, value}, ...]
     topic: str = ""
     summary: str = ""  # emitted on topic shift/resolution
 
@@ -37,17 +37,16 @@ class Topic:
 
 @dataclass
 class Entity:
-    """A person, place, project, tool, or fact in the user's life."""
+    """A person, place, project, tool, or category in the user's world."""
     name: str
-    type: str  # "person", "place", "project", "tool", "fact", "category"
+    type: str  # "person", "place", "project", "tool", "category", etc.
     aliases: list[str] = field(default_factory=list)
-    value: str = ""  # for facts: "45 min each way"
 
 
 @dataclass
 class RecallResult:
     """Result from a recall query."""
-    mode: str  # "fact", "topic", "not_found"
-    answer: str = ""
+    mode: str  # "topic", "entity", "not_found"
+    entities: list[str] = field(default_factory=list)  # entities mentioned in query
     topics: list[tuple] = field(default_factory=list)  # (topic_dict, score)
     n_results: int = 0
