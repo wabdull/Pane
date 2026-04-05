@@ -59,7 +59,6 @@ a fenced code block labeled `turn.json`:
   "entities": [...],
   "categories": [...],
   "facts": [...],
-  "topic": "...",
   "summary": "...",
   "tools_used": []
 }
@@ -82,8 +81,7 @@ GENERIC_NOUNS = {
     "backend", "frontend", "infra", "code", "codebase",
 }
 
-REQUIRED_FIELDS = {"entities", "categories", "facts", "topic", "summary",
-                   "tools_used"}
+REQUIRED_FIELDS = {"entities", "categories", "facts", "summary", "tools_used"}
 
 # Scripted conversation designed to exercise the full discipline:
 #   - specific compound entity names (auth-session, admin-dashboard)
@@ -197,15 +195,6 @@ def validate_turn(turn, turns_covered):
             (f"{len(summary)} chars > {budget} budget "
              f"({turns_covered}-turn topic)") if not ok else None,
         ))
-
-    # topic is a short label
-    topic = turn.get("topic", "") or ""
-    ok = 1 <= len(topic) <= 80
-    checks.append((
-        "topic_concise",
-        ok,
-        f"topic len={len(topic)}: {topic!r}" if not ok else None,
-    ))
 
     return checks
 

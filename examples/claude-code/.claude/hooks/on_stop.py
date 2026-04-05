@@ -13,11 +13,16 @@ from pane.schema import (
     USER_ENTITY,
     create_db,
     create_window,
+    entity_fingerprint,
+    extend_topic,
+    get_most_recent_topic,
     mark_loaded,
+    parse_fingerprint,
     save_entity,
     save_entity_fact,
     save_messages,
     save_topic,
+    set_topic_summary,
 )
 
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'memory', 'pane.db')
@@ -123,12 +128,17 @@ def main():
 
     # Source of truth for user/assistant text is the session transcript
     user_msg, assistant_msg = read_last_turn_from_transcript(transcript_path)
-    topic = metadata.get("topic", "general")
     summary = metadata.get("summary", "")
     entities = metadata.get("entities", [])
     categories = metadata.get("categories", [])
     facts = metadata.get("facts", [])
     tools = metadata.get("tools_used", [])
+
+    # Normalize current-turn entity set
+    current_entities = [
+        (e or "").lower().strip() for e in entities if (e or "").strip()
+    ]
+    current_set = set(current_entities)
 
     # Store to DB. Python's sqlite3 auto-transactions per statement; each
     # save_* helper commits on its own. Not strictly atomic end-to-end, but
@@ -143,30 +153,70 @@ def main():
     if assistant_msg:
         messages.append({"role": "assistant", "content": assistant_msg})
     if not messages:
-        messages.append({"role": "assistant", "content": f"[{topic}]"})
+        messages.append({"role": "assistant", "content": "[turn]"})
 
     saved = save_messages(db, window_id, messages)
+    new_start, new_end = saved[0][0], saved[-1][0]
 
     # Build tags — entities and categories only, no keywords
-    tags = [f"entity:{e.lower().strip()}" for e in entities if e.strip()]
+    tags = [f"entity:{e}" for e in current_entities]
     tags += [f"cat:{c.lower().strip()}" for c in categories if c.strip()]
 
-    new_topic_id = save_topic(
-        db, window_id,
-        title=topic,
-        start_message_id=saved[0][0],
-        end_message_id=saved[-1][0],
-        summary=summary,
-        tags=tags,
-    )
-
-    # Entity registry
-    for ent in entities:
-        if ent.strip() and len(ent.strip()) > 1:
-            save_entity(db, ent.strip(), entity_type="unknown", aliases=[ent.strip()])
+    # Entity registry (register before topic grouping so alias map is fresh)
+    for ent in current_entities:
+        if len(ent) > 1:
+            save_entity(db, ent, entity_type="unknown", aliases=[ent])
     for cat in categories:
-        if cat.strip() and len(cat.strip()) > 1:
-            save_entity(db, cat.strip(), entity_type="category", aliases=[cat.strip()])
+        c = (cat or "").lower().strip()
+        if c and len(c) > 1:
+            save_entity(db, c, entity_type="category", aliases=[c])
+
+    # ── Topic grouping ────────────────────────────────────────
+    # Rule: extend the most-recent topic if current entities overlap with
+    # its fingerprint, OR if this turn has no entities (drift turn, stays
+    # in current topic). Otherwise, close the prior topic and open a new
+    # one. When opening a new topic on a transition, the speaker's summary
+    # attaches to the PRIOR topic (the one being closed), not the new one.
+    most_recent = get_most_recent_topic(db)
+    topic_id = None
+    topic_action = None
+
+    if most_recent is None:
+        # No prior topic -> create first topic
+        title = entity_fingerprint(current_set) or "general"
+        topic_id = save_topic(
+            db, window_id, title=title,
+            start_message_id=new_start, end_message_id=new_end,
+            summary="", tags=tags, entities=current_entities,
+        )
+        topic_action = "new"
+    else:
+        prior_entities = parse_fingerprint(most_recent["entity_fingerprint"])
+        overlap = bool(current_set & prior_entities)
+
+        if not current_set or overlap:
+            # Extend the existing topic (drift or continuing subject)
+            merged_title = entity_fingerprint(prior_entities | current_set) or \
+                           most_recent["title"]
+            extend_topic(
+                db, most_recent["id"], new_end_message_id=new_end,
+                new_entities=list(current_set), new_tags=tags,
+                new_title=merged_title,
+            )
+            topic_id = most_recent["id"]
+            topic_action = "extend"
+        else:
+            # Hard topic shift. Close the prior topic with the speaker's
+            # summary (if emitted), then open a new topic row.
+            if summary:
+                set_topic_summary(db, most_recent["id"], summary)
+            title = entity_fingerprint(current_set) or "general"
+            topic_id = save_topic(
+                db, window_id, title=title,
+                start_message_id=new_start, end_message_id=new_end,
+                summary="", tags=tags, entities=current_entities,
+            )
+            topic_action = "new"
 
     # Entity-attached facts. Supports two shapes in turn.json:
     #   {"entity": "cpp", "key": "exceptions", "value": "disallowed"}
@@ -186,17 +236,16 @@ def main():
                 save_entity(db, entity_name, entity_type="unknown",
                             aliases=[entity_name])
 
-    db.commit()
-
-    # Mark the newly-created topic as loaded (TTL = max) so it stays in
-    # the window for the next few turns.
-    mark_loaded(db, new_topic_id)
+    # Mark the (new or extended) topic as loaded — refreshes TTL.
+    # (All save_* helpers commit internally, no explicit commit needed.)
+    mark_loaded(db, topic_id)
 
     tokens_stored = (len(user_msg) + len(assistant_msg)) // 4
     update_stats(
         turns=1,
         tokens_stored=tokens_stored,
-        topics_stored=1,
+        topics_created=1 if topic_action == "new" else 0,
+        topics_extended=1 if topic_action == "extend" else 0,
         facts_stored=facts_saved,
         tool_calls=len(tools),
     )

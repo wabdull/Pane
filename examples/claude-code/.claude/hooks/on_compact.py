@@ -57,7 +57,16 @@ def main():
     user_facts = get_entity_facts(db, USER_ENTITY)
     topics = get_all_topics(db)
     entities = [e for e in get_all_entities(db) if e['type'] != 'category']
+
+    # Snapshot: how big was the raw history at time of compaction? Tells us
+    # when Pane's managed window wasn't enough to prevent a compact.
+    row = db.execute(
+        "SELECT COALESCE(SUM(LENGTH(content)), 0) AS total FROM messages"
+    ).fetchone()
+    notional_at_compact = (row["total"] or 0) // 4
+
     db.close()
+    update_stats(compaction_notional_tokens=notional_at_compact)
 
     lines = ["[PANE MEMORY - survived compaction]",
              "Your memory system has stored information from previous turns.",

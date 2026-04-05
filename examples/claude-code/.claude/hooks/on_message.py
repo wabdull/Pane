@@ -105,14 +105,31 @@ def main():
     context = "[MEMORY]\n" + "\n\n".join(parts) if parts else ""
 
     loaded_with_ttl = get_loaded_topics_with_ttl(db)
+
+    # Notional = what the full raw history would cost if replayed every turn.
+    # Actual = what Pane actually injects via summaries + facts.
+    # The delta is what Pane is saving you on this turn.
+    row = db.execute(
+        "SELECT COALESCE(SUM(LENGTH(content)), 0) AS total FROM messages"
+    ).fetchone()
+    notional_tokens = (row["total"] or 0) // 4
+
     db.close()
 
     if context:
         tokens = len(context) // 4
-        update_stats(recalls=1, tokens_injected=tokens)
+        saved = max(0, notional_tokens - tokens)
+        update_stats(
+            recalls=1,
+            tokens_injected=tokens,
+            tokens_saved=saved,
+        )
         merge_stats(
             loaded_topics=[{"id": tid, "ttl": ttl} for tid, ttl in loaded_with_ttl],
             active_entities=active,
+            last_turn_notional_tokens=notional_tokens,
+            last_turn_injected_tokens=tokens,
+            last_turn_saved_tokens=saved,
         )
         print(json.dumps({
             "hookSpecificOutput": {

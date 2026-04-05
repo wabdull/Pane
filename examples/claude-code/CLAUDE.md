@@ -1,25 +1,30 @@
 # Pane Memory System
 
-After EVERY response you give, silently write a JSON file to `.claude/memory/turn.json` using the Write tool. This file contains ONLY metadata — the system captures the actual user/assistant text from the session transcript, so don't echo it here.
+After EVERY response you give, silently write a JSON file to `.claude/memory/turn.json` using the Write tool. This file contains ONLY metadata — the system derives topic identity from the entities and captures user/assistant text from the session transcript, so don't echo either here.
 
 The file should contain:
 ```json
 {
   "entities": ["people, places, projects, tools the USER mentioned"],
-  "categories": ["broad topics: health, career, cooking, travel, etc."],
+  "categories": ["broad themes: backend, frontend, auth, dashboard, etc."],
   "facts": [
     {"key": "commute", "value": "35 min each way"},
     {"entity": "cpp", "key": "exceptions", "value": "disallowed at work"}
   ],
-  "topic": "short label for this exchange",
   "summary": "",
   "tools_used": ["tools you used this turn: Read, Write, Bash, etc."]
 }
 ```
 
-**When a topic resolves or the conversation shifts to a new subject**, fill in the `summary` field with a compact description of what was discussed/accomplished on the previous topic. This summary replaces loading the full conversation history later.
+## Summary — emit on topic transitions
 
-**Length should scale with depth** — roughly 50-100 tokens per turn the topic covered. A 2-turn topic gets ~1 sentence. A 5-turn topic gets a few sentences. A 20-turn deep dive gets a paragraph. Include concrete specifics (names, numbers, decisions, constraints) — not generic wrap-up.
+A "topic" is defined by its active entity set — the system groups consecutive turns that share entities. When the user pivots to a **genuinely new work area** (entities don't overlap with what you were just discussing), emit `summary` describing the PRIOR thread you're leaving, not the new one you're entering.
+
+- Drift turns ("ok proceed") → `summary: ""`
+- Continuing the same subject → `summary: ""`
+- Pivoting to a disjoint work area (e.g. cpp auth-session → postgres webhook) → `summary: "<description of the cpp auth-session thread>"`
+
+**Length should scale with depth** — roughly 50-100 tokens per turn the prior thread covered. A 2-turn thread gets ~1 sentence. A 5-turn thread gets a few sentences. A 20-turn deep dive gets a paragraph. Include concrete specifics (names, numbers, decisions, constraints) — not generic wrap-up.
 
 ## Facts
 

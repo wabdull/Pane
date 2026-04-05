@@ -37,7 +37,7 @@ LLM responds normally + writes metadata (entities, facts, topic)
 Stale topics auto-unload from context (TTL countdown)
 ```
 
-The metadata emission costs ~20 extra output tokens per turn. The LLM is already generating a response — the metadata piggybacks on that. Retrieval is tag intersection in SQLite — instant, free.
+The metadata emission costs ~100-200 extra output tokens per turn. The LLM is already generating a response — the metadata piggybacks on that. Retrieval is tag intersection in SQLite — instant, free.
 
 ## What's Always In Context (~500 tokens)
 

@@ -38,6 +38,7 @@ def create_db(path):
             window_id TEXT NOT NULL,
             title TEXT NOT NULL,
             summary TEXT NOT NULL DEFAULT '',
+            entity_fingerprint TEXT NOT NULL DEFAULT '',
             start_message_id INTEGER NOT NULL,
             end_message_id INTEGER NOT NULL
         );
@@ -116,13 +117,28 @@ def get_topic_messages(db, topic_id):
 
 # ── Topics ────────────────────────────────────────────────────
 
+def entity_fingerprint(entities):
+    """Canonical fingerprint: sorted comma-joined entity names. Empty if none."""
+    normed = {(e or "").lower().strip() for e in (entities or [])}
+    normed.discard("")
+    return ",".join(sorted(normed))
+
+
+def parse_fingerprint(fp):
+    """Inverse of entity_fingerprint: string -> set of entity names."""
+    return {x for x in (fp or "").split(",") if x}
+
+
 def save_topic(db, window_id, title, start_message_id, end_message_id,
-               summary="", tags=None):
-    """Store a topic with tags. Returns topic ID."""
+               summary="", tags=None, entities=None):
+    """Store a topic with tags + entity fingerprint. Returns topic ID."""
     topic_id = str(uuid.uuid4())
+    fingerprint = entity_fingerprint(entities or [])
     db.execute(
-        "INSERT INTO topics (id, window_id, title, summary, start_message_id, end_message_id) VALUES (?, ?, ?, ?, ?, ?)",
-        (topic_id, window_id, title, summary, start_message_id, end_message_id)
+        "INSERT INTO topics (id, window_id, title, summary, entity_fingerprint, "
+        "start_message_id, end_message_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (topic_id, window_id, title, summary, fingerprint,
+         start_message_id, end_message_id)
     )
     if tags:
         for tag in tags:
@@ -132,6 +148,7 @@ def save_topic(db, window_id, title, start_message_id, end_message_id,
                     "INSERT OR IGNORE INTO topic_tags (topic_id, tag) VALUES (?, ?)",
                     (topic_id, tag)
                 )
+    db.commit()
     return topic_id
 
 
@@ -141,15 +158,81 @@ def get_all_topics(db):
     return [dict(r) for r in rows]
 
 
+def get_most_recent_topic(db):
+    """Return the most-recently-ended topic, or None if the table is empty."""
+    row = db.execute(
+        "SELECT * FROM topics ORDER BY end_message_id DESC LIMIT 1"
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def extend_topic(db, topic_id, new_end_message_id, new_entities=None,
+                 new_tags=None, new_title=None):
+    """Extend an existing topic: push end_message_id forward, merge entities
+    into the fingerprint, merge tags, optionally update title.
+    """
+    current = db.execute(
+        "SELECT entity_fingerprint FROM topics WHERE id = ?", (topic_id,)
+    ).fetchone()
+    if not current:
+        return
+
+    merged_entities = parse_fingerprint(current["entity_fingerprint"])
+    for e in (new_entities or []):
+        n = (e or "").lower().strip()
+        if n:
+            merged_entities.add(n)
+    new_fingerprint = entity_fingerprint(merged_entities)
+
+    if new_title is not None:
+        db.execute(
+            "UPDATE topics SET end_message_id = ?, entity_fingerprint = ?, "
+            "title = ? WHERE id = ?",
+            (new_end_message_id, new_fingerprint, new_title, topic_id)
+        )
+    else:
+        db.execute(
+            "UPDATE topics SET end_message_id = ?, entity_fingerprint = ? "
+            "WHERE id = ?",
+            (new_end_message_id, new_fingerprint, topic_id)
+        )
+
+    for tag in (new_tags or []):
+        t = (tag or "").lower().strip()
+        if t:
+            db.execute(
+                "INSERT OR IGNORE INTO topic_tags (topic_id, tag) VALUES (?, ?)",
+                (topic_id, t)
+            )
+    db.commit()
+
+
+def set_topic_summary(db, topic_id, summary):
+    """Write a summary on an existing topic (used when closing a topic)."""
+    db.execute(
+        "UPDATE topics SET summary = ? WHERE id = ?",
+        ((summary or "").strip(), topic_id)
+    )
+    db.commit()
+
+
 def get_topics_by_tags(db, tags):
-    """Find topics matching ANY of the given tags. Returns topic IDs with match counts."""
+    """Find topics matching ANY of the given tags. Returns topic IDs with
+    match counts, ranked by overlap-count DESC then recency DESC.
+    """
     if not tags:
         return []
     placeholders = ",".join("?" for _ in tags)
     rows = db.execute(
-        f"""SELECT topic_id, COUNT(*) as match_count, GROUP_CONCAT(tag) as matched_tags
-            FROM topic_tags WHERE tag IN ({placeholders})
-            GROUP BY topic_id ORDER BY match_count DESC""",
+        f"""SELECT tt.topic_id,
+                   COUNT(*) as match_count,
+                   GROUP_CONCAT(tt.tag) as matched_tags,
+                   MAX(t.end_message_id) as recency
+            FROM topic_tags tt
+            JOIN topics t ON t.id = tt.topic_id
+            WHERE tt.tag IN ({placeholders})
+            GROUP BY tt.topic_id
+            ORDER BY match_count DESC, recency DESC""",
         tags
     ).fetchall()
     return [dict(r) for r in rows]
