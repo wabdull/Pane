@@ -81,6 +81,14 @@ GENERIC_NOUNS = {
     "backend", "frontend", "infra", "code", "codebase",
 }
 
+# Domain nouns that should NOT appear as categories. Categories are WORK TYPES
+# (architecture, testing, debugging), not domain descriptors (backend, auth).
+DOMAIN_NOUNS_NOT_CATEGORIES = {
+    "backend", "frontend", "auth", "authentication", "session", "database",
+    "infra", "infrastructure", "api", "webhook", "dashboard", "data",
+    "networking", "security", "storage", "cache", "queue", "messaging",
+}
+
 REQUIRED_FIELDS = {"entities", "categories", "facts", "summary", "tools_used"}
 
 # Scripted conversation designed to exercise the full discipline:
@@ -163,6 +171,34 @@ def validate_turn(turn, turns_covered):
         "entities_not_generic",
         not generic,
         f"generic nouns as entities: {generic}" if generic else None,
+    ))
+
+    # categories drive subtopic grouping — should be present on non-drift turns
+    categories = turn.get("categories", []) or []
+    has_entities = bool(entities)
+    checks.append((
+        "categories_present",
+        bool(categories) or not has_entities,  # OK if drift turn (no entities either)
+        "entities present but categories empty" if has_entities and not categories else None,
+    ))
+
+    # categories should NOT duplicate entity names (discipline violation)
+    ent_set = {e.lower().strip() for e in entities}
+    cat_set = {c.lower().strip() for c in categories}
+    overlap = ent_set & cat_set
+    checks.append((
+        "categories_not_entity_names",
+        not overlap,
+        f"in both entities AND categories: {sorted(overlap)}" if overlap else None,
+    ))
+
+    # categories should be work-types, not domain descriptors
+    domain_cats = cat_set & DOMAIN_NOUNS_NOT_CATEGORIES
+    checks.append((
+        "categories_are_work_types",
+        not domain_cats,
+        f"domain nouns as categories (should be entities or omitted): "
+        f"{sorted(domain_cats)}" if domain_cats else None,
     ))
 
     # facts are {key, value} dicts (entity optional)

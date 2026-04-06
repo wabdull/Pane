@@ -5,8 +5,8 @@ After EVERY response you give, silently write a JSON file to `.claude/memory/tur
 The file should contain:
 ```json
 {
-  "entities": ["people, places, projects, tools the USER mentioned"],
-  "categories": ["broad themes: backend, frontend, auth, dashboard, etc."],
+  "entities": ["specific things the USER is working on: cpp, auth-session, etc."],
+  "categories": ["work type this turn: architecture, testing, debugging, etc."],
   "facts": [
     {"key": "commute", "value": "35 min each way"},
     {"entity": "cpp", "key": "exceptions", "value": "disallowed at work"}
@@ -44,22 +44,35 @@ A fact captures something durable — a preference, constraint, attribute, or ru
 
 ## Entities vs Categories
 
-The test: **"Could I attach a durable fact to this name without needing more context?"**
-- Yes → **entity** (specific, fact-attachable)
-- No → **category** (broad theme, retrieval only, no facts)
+**Entities = the nouns** (what you're working on). Specific, fact-attachable.
+**Categories = the verbs** (what type of work). Broad activity types.
 
-| entity ✅                              | category ✅           |
-|---------------------------------------|----------------------|
-| cpp, python, postgres                 | backend, frontend    |
-| sarah, alice-chen                     | team, management     |
-| admin-dashboard, billing-dashboard    | dashboard            |
-| auth-session, oauth-session           | session, auth        |
-| payment-webhook, github-webhook       | webhook, integration |
-| src/auth/session.py, AuthController   | code, api            |
+The system uses entities to identify the DOMAIN and categories to identify the WORK TYPE. The combination forms a subtopic: `auth-session × testing` is different from `auth-session × architecture`.
 
-**Generic common nouns are NOT entities.** "dashboard" alone isn't an entity — *which* dashboard? Use the specific name (`admin-dashboard`, `billing-dashboard`) as the entity, and put the generic noun in categories if useful.
+### Entities — what you're working on
 
-**Use compound names to make entities specific**: `auth-session`, `payment-webhook`, `admin-dashboard`, `acme-postgres`, `src/auth/session.py`.
+Specific identifiers you could attach a durable fact to.
+
+`cpp`, `python`, `postgres`, `auth-session`, `admin-dashboard`, `payment-webhook`, `sarah`, `src/auth/session.py`
+
+**Use compound names to make entities specific**: `auth-session`, `payment-webhook`, `admin-dashboard`. Generic nouns like "dashboard" or "session" alone are NOT entities.
+
+### Categories — what type of work
+
+Activity types that describe HOW you're working, not WHAT on. Pick 1-2 per turn.
+
+`architecture`, `testing`, `debugging`, `deployment`, `review`, `documentation`, `performance`, `refactoring`, `planning`, `discussion`
+
+**Do NOT restate entity domains as categories.** If entities are `[cpp, auth-session]`, don't also put `auth`, `backend`, `session` in categories — those just repeat the entities at a different granularity. Instead, say what TYPE of work: `[architecture]` or `[testing]` or `[debugging]`.
+
+**Be consistent.** Reuse the same category across consecutive turns if the work type hasn't genuinely changed. If you picked `[architecture]` last turn and the work is still architecture, keep `[architecture]`. Don't switch to `[refactoring]` or `[discussion]`. Only change when the fundamental activity shifts (design → testing, debugging → deployment).
+
+| entities describe...          | categories describe...         |
+|-------------------------------|-------------------------------|
+| `[cpp, auth-session]`        | `[architecture]` — designing  |
+| `[cpp, auth-session]`        | `[testing]` — writing tests   |
+| `[admin-dashboard, python]`  | `[debugging]` — fixing a bug  |
+| `[payment-webhook, postgres]`| `[performance]` — query tuning|
 
 ## Rules
 

@@ -134,11 +134,15 @@ def main():
     facts = metadata.get("facts", [])
     tools = metadata.get("tools_used", [])
 
-    # Normalize current-turn entity set
+    # Normalize current-turn entity + category sets
     current_entities = [
         (e or "").lower().strip() for e in entities if (e or "").strip()
     ]
-    current_set = set(current_entities)
+    current_categories = [
+        (c or "").lower().strip() for c in categories if (c or "").strip()
+    ]
+    current_ent_set = set(current_entities)
+    current_cat_set = set(current_categories)
 
     # Store to DB. Python's sqlite3 auto-transactions per statement; each
     # save_* helper commits on its own. Not strictly atomic end-to-end, but
@@ -160,7 +164,7 @@ def main():
 
     # Build tags — entities and categories only, no keywords
     tags = [f"entity:{e}" for e in current_entities]
-    tags += [f"cat:{c.lower().strip()}" for c in categories if c.strip()]
+    tags += [f"cat:{c}" for c in current_categories]
 
     # Entity registry (register before topic grouping so alias map is fresh)
     for ent in current_entities:
@@ -171,50 +175,69 @@ def main():
         if c and len(c) > 1:
             save_entity(db, c, entity_type="category", aliases=[c])
 
-    # ── Topic grouping ────────────────────────────────────────
-    # Rule: extend the most-recent topic if current entities overlap with
-    # its fingerprint, OR if this turn has no entities (drift turn, stays
-    # in current topic). Otherwise, close the prior topic and open a new
-    # one. When opening a new topic on a transition, the speaker's summary
-    # attaches to the PRIOR topic (the one being closed), not the new one.
+    # ── Topic grouping (two-axis: entity + category) ────────
+    #
+    # Entity overlap  + category overlap  → EXTEND (same sub-thread)
+    # Entity overlap  + category NO overlap → NEW ROW (subtopic shift)
+    # No entity overlap                     → NEW ROW (domain shift)
+    # Drift (no entities AND no categories) → EXTEND (stays in current topic)
+    #
+    # On any NEW ROW, the speaker's summary attaches to the PRIOR topic
+    # (the one being closed), not the new one.
     most_recent = get_most_recent_topic(db)
     topic_id = None
     topic_action = None
+    is_drift = not current_ent_set and not current_cat_set
 
     if most_recent is None:
-        # No prior topic -> create first topic
-        title = entity_fingerprint(current_set) or "general"
+        title = entity_fingerprint(current_ent_set) or "general"
         topic_id = save_topic(
             db, window_id, title=title,
             start_message_id=new_start, end_message_id=new_end,
-            summary="", tags=tags, entities=current_entities,
+            summary="", tags=tags,
+            entities=current_entities, categories=current_categories,
         )
         topic_action = "new"
+    elif is_drift:
+        # Drift turn — extend whatever we're on
+        extend_topic(
+            db, most_recent["id"], new_end_message_id=new_end,
+            new_tags=tags,
+        )
+        topic_id = most_recent["id"]
+        topic_action = "extend"
     else:
-        prior_entities = parse_fingerprint(most_recent["entity_fingerprint"])
-        overlap = bool(current_set & prior_entities)
+        prior_ent = parse_fingerprint(most_recent["entity_fingerprint"])
+        prior_cat = parse_fingerprint(most_recent["category_fingerprint"])
 
-        if not current_set or overlap:
-            # Extend the existing topic (drift or continuing subject)
-            merged_title = entity_fingerprint(prior_entities | current_set) or \
+        # Empty axis this turn = "no change" on that axis, not "mismatched."
+        # User saying "what pattern?" without naming cpp is NOT a domain switch.
+        ent_continues = not current_ent_set or bool(current_ent_set & prior_ent)
+        cat_continues = not current_cat_set or bool(current_cat_set & prior_cat)
+
+        if ent_continues and cat_continues:
+            # Same sub-thread — extend
+            merged_title = entity_fingerprint(prior_ent | current_ent_set) or \
                            most_recent["title"]
             extend_topic(
                 db, most_recent["id"], new_end_message_id=new_end,
-                new_entities=list(current_set), new_tags=tags,
-                new_title=merged_title,
+                new_entities=list(current_ent_set),
+                new_categories=list(current_cat_set),
+                new_tags=tags, new_title=merged_title,
             )
             topic_id = most_recent["id"]
             topic_action = "extend"
         else:
-            # Hard topic shift. Close the prior topic with the speaker's
-            # summary (if emitted), then open a new topic row.
+            # Subtopic shift (entity continues, category changed) or
+            # domain shift (entity changed). Either way: close prior, open new.
             if summary:
                 set_topic_summary(db, most_recent["id"], summary)
-            title = entity_fingerprint(current_set) or "general"
+            title = entity_fingerprint(current_ent_set) or "general"
             topic_id = save_topic(
                 db, window_id, title=title,
                 start_message_id=new_start, end_message_id=new_end,
-                summary="", tags=tags, entities=current_entities,
+                summary="", tags=tags,
+                entities=current_entities, categories=current_categories,
             )
             topic_action = "new"
 

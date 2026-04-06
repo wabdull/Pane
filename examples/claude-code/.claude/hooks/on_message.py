@@ -16,11 +16,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sr
 from pane.schema import (
     USER_ENTITY,
     create_db,
-    get_active_entities,
+    get_entities_from_loaded_topics,
     get_facts_for_entities,
     get_loaded_topic_ids,
     get_loaded_topics_with_ttl,
-    set_active_entities,
     tick_ttl,
 )
 from pane.recall import recall, load_context, format_facts
@@ -83,39 +82,19 @@ def main():
     tick_ttl(db, matched_topic_ids)
     loaded_topic_ids = get_loaded_topic_ids(db)
 
-    # ── Entities: hard-switch track (sticky on drift) ────────
-    # Only replace active set if this turn mentions domain entities.
-    # Empty mentions = drift turn = keep previous active set.
-    if result.entities:
-        set_active_entities(db, result.entities)
-    active = get_active_entities(db)
+    # ── Entity facts: derived from loaded topics ──────────────
+    # Active entities = union of entity_fingerprints across all loaded
+    # topics. Facts follow topics. Topics follow TTL. One system.
+    #
+    # - Topic loads -> its entities' facts auto-load
+    # - Topic unloads (TTL=0) -> if no other loaded topic has that
+    #   entity -> entity's facts drop
+    # - Subtopics with the same entity set keep facts alive independently
+    active = get_entities_from_loaded_topics(db)
 
-    # ── Facts loading ──────────────────────────────────────────
-    #
-    # CURRENT: all user-entity facts load unconditionally every turn.
-    # Active entity facts (cpp, postgres, etc.) load via hard-switch.
-    #
-    # FUTURE (two-tier, not category-scoped):
-    #
-    #   Tier 1 — Identity (always loaded, ~100-200 tokens):
-    #     name, role, timezone, team, preferences that affect every turn.
-    #     These are the "you know me" facts.
-    #
-    #   Tier 2 — Domain (loaded when relevant):
-    #     Programming prefs load when coding categories are active.
-    #     Personal facts load when conversation is casual / personal.
-    #     Project-specific facts are already scoped via entity hard-switch
-    #     (e.g. cpp.exceptions only loads when cpp is active).
-    #
-    # We're NOT implementing category-scoped facts yet — it would require
-    # the speaker to classify each fact at emission time (more tokens,
-    # more compliance risk). Instead we'll collect data via stats.json on
-    # how large the fact payload grows in real usage, and design the
-    # scoping from observed patterns rather than guesses.
-    #
-    # When user-entity facts grow past ~100 entries the two-tier split
-    # becomes worth building. Until then, loading all of them is fine
-    # (~750 tokens for 50 facts = 0.4% of a 200K window).
+    # User-entity facts always load (identity tier).
+    # FUTURE: split user facts into identity vs domain tiers when
+    # user fact count exceeds ~100 entries. See docs/ARCHITECTURE.md.
     facts = get_facts_for_entities(db, [USER_ENTITY] + active)
 
     # ── Build context block ─────────────────────────────────

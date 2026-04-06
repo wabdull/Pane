@@ -40,6 +40,7 @@ def create_db(path):
             title TEXT NOT NULL,
             summary TEXT NOT NULL DEFAULT '',
             entity_fingerprint TEXT NOT NULL DEFAULT '',
+            category_fingerprint TEXT NOT NULL DEFAULT '',
             start_message_id INTEGER NOT NULL,
             end_message_id INTEGER NOT NULL
         );
@@ -131,14 +132,16 @@ def parse_fingerprint(fp):
 
 
 def save_topic(db, window_id, title, start_message_id, end_message_id,
-               summary="", tags=None, entities=None):
-    """Store a topic with tags + entity fingerprint. Returns topic ID."""
+               summary="", tags=None, entities=None, categories=None):
+    """Store a topic with tags + entity/category fingerprints. Returns topic ID."""
     topic_id = str(uuid.uuid4())
-    fingerprint = entity_fingerprint(entities or [])
+    ent_fp = entity_fingerprint(entities or [])
+    cat_fp = entity_fingerprint(categories or [])  # same normalization logic
     db.execute(
         "INSERT INTO topics (id, window_id, title, summary, entity_fingerprint, "
-        "start_message_id, end_message_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (topic_id, window_id, title, summary, fingerprint,
+        "category_fingerprint, start_message_id, end_message_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (topic_id, window_id, title, summary, ent_fp, cat_fp,
          start_message_id, end_message_id)
     )
     if tags:
@@ -168,12 +171,13 @@ def get_most_recent_topic(db):
 
 
 def extend_topic(db, topic_id, new_end_message_id, new_entities=None,
-                 new_tags=None, new_title=None):
+                 new_categories=None, new_tags=None, new_title=None):
     """Extend an existing topic: push end_message_id forward, merge entities
-    into the fingerprint, merge tags, optionally update title.
+    and categories into their fingerprints, merge tags, optionally update title.
     """
     current = db.execute(
-        "SELECT entity_fingerprint FROM topics WHERE id = ?", (topic_id,)
+        "SELECT entity_fingerprint, category_fingerprint FROM topics WHERE id = ?",
+        (topic_id,)
     ).fetchone()
     if not current:
         return
@@ -183,19 +187,27 @@ def extend_topic(db, topic_id, new_end_message_id, new_entities=None,
         n = (e or "").lower().strip()
         if n:
             merged_entities.add(n)
-    new_fingerprint = entity_fingerprint(merged_entities)
+
+    merged_cats = parse_fingerprint(current["category_fingerprint"])
+    for c in (new_categories or []):
+        n = (c or "").lower().strip()
+        if n:
+            merged_cats.add(n)
+
+    ent_fp = entity_fingerprint(merged_entities)
+    cat_fp = entity_fingerprint(merged_cats)
 
     if new_title is not None:
         db.execute(
             "UPDATE topics SET end_message_id = ?, entity_fingerprint = ?, "
-            "title = ? WHERE id = ?",
-            (new_end_message_id, new_fingerprint, new_title, topic_id)
+            "category_fingerprint = ?, title = ? WHERE id = ?",
+            (new_end_message_id, ent_fp, cat_fp, new_title, topic_id)
         )
     else:
         db.execute(
-            "UPDATE topics SET end_message_id = ?, entity_fingerprint = ? "
-            "WHERE id = ?",
-            (new_end_message_id, new_fingerprint, topic_id)
+            "UPDATE topics SET end_message_id = ?, entity_fingerprint = ?, "
+            "category_fingerprint = ? WHERE id = ?",
+            (new_end_message_id, ent_fp, cat_fp, topic_id)
         )
 
     for tag in (new_tags or []):
@@ -339,6 +351,22 @@ def get_loaded_topic_ids(db):
         "SELECT topic_id FROM loaded_topics ORDER BY ttl DESC"
     ).fetchall()
     return [r["topic_id"] for r in rows]
+
+
+def get_entities_from_loaded_topics(db):
+    """Derive active entities from what's loaded: union of entity_fingerprints
+    across all currently-loaded topics. No separate active_entities table needed.
+    """
+    rows = db.execute(
+        """SELECT DISTINCT t.entity_fingerprint
+           FROM loaded_topics lt
+           JOIN topics t ON t.id = lt.topic_id"""
+    ).fetchall()
+    active = set()
+    for r in rows:
+        active |= parse_fingerprint(r["entity_fingerprint"])
+    active.discard(USER_ENTITY)
+    return sorted(active)
 
 
 def get_loaded_topics_with_ttl(db):

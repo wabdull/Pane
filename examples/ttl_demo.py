@@ -7,7 +7,7 @@
                                         entities open a new row.
 
 Each turn, we simulate the on_message + on_stop hook pipeline:
-  recall -> tick_ttl -> set_active_entities -> group_into_topic.
+  recall -> tick_ttl -> group_into_topic -> derive active entities.
 
 Run:
     PYTHONPATH=src python examples/ttl_demo.py
@@ -26,7 +26,7 @@ from pane.schema import (
     create_window,
     entity_fingerprint,
     extend_topic,
-    get_active_entities,
+    get_entities_from_loaded_topics,
     get_facts_for_entities,
     get_loaded_topics_with_ttl,
     get_most_recent_topic,
@@ -36,7 +36,6 @@ from pane.schema import (
     save_entity_fact,
     save_messages,
     save_topic,
-    set_active_entities,
     set_topic_summary,
     tick_ttl,
 )
@@ -80,43 +79,58 @@ def seed_entities_and_facts(db):
     save_entity_fact(db, "payment-webhook", "blocker", "missing index")
 
 
-def group_turn(db, window_id, user_msg, extracted_entities, summary=""):
-    """Simulate on_stop's grouping logic. Returns (topic_id, action, title)."""
-    # Save the message(s) for this turn
+def group_turn(db, window_id, user_msg, extracted_entities,
+               turn_categories, summary=""):
+    """Simulate on_stop's two-axis grouping logic.
+    Returns (topic_id, action, title).
+    """
     saved = save_messages(db, window_id, [{"role": "user", "content": user_msg}])
     new_start, new_end = saved[0][0], saved[-1][0]
 
-    current_set = set(extracted_entities)
-    tags = [f"entity:{e}" for e in current_set]
+    ent_set = set(extracted_entities)
+    cat_set = set(turn_categories)
+    tags = [f"entity:{e}" for e in ent_set] + [f"cat:{c}" for c in cat_set]
+    is_drift = not ent_set and not cat_set
 
     most_recent = get_most_recent_topic(db)
 
     if most_recent is None:
-        title = entity_fingerprint(current_set) or "general"
+        title = entity_fingerprint(ent_set) or "general"
         tid = save_topic(db, window_id, title=title,
-                          start_message_id=new_start, end_message_id=new_end,
-                          tags=tags, entities=list(current_set))
+                         start_message_id=new_start, end_message_id=new_end,
+                         tags=tags, entities=list(ent_set),
+                         categories=list(cat_set))
         return tid, "NEW", title
 
-    prior_set = parse_fingerprint(most_recent["entity_fingerprint"])
-    overlap = bool(current_set & prior_set)
-
-    if not current_set or overlap:
-        merged = prior_set | current_set
-        new_title = entity_fingerprint(merged) or most_recent["title"]
+    if is_drift:
         extend_topic(db, most_recent["id"], new_end_message_id=new_end,
-                      new_entities=list(current_set), new_tags=tags,
-                      new_title=new_title)
-        return most_recent["id"], "EXTEND", new_title
+                     new_tags=tags)
+        return most_recent["id"], "EXTEND", most_recent["title"]
+
+    prior_ent = parse_fingerprint(most_recent["entity_fingerprint"])
+    prior_cat = parse_fingerprint(most_recent["category_fingerprint"])
+
+    # Empty axis this turn = "no change" on that axis
+    ent_continues = not ent_set or bool(ent_set & prior_ent)
+    cat_continues = not cat_set or bool(cat_set & prior_cat)
+
+    if ent_continues and cat_continues:
+        merged_title = entity_fingerprint(prior_ent | ent_set) or \
+                       most_recent["title"]
+        extend_topic(db, most_recent["id"], new_end_message_id=new_end,
+                     new_entities=list(ent_set), new_categories=list(cat_set),
+                     new_tags=tags, new_title=merged_title)
+        return most_recent["id"], "EXTEND", merged_title
     else:
-        # Topic transition — close prior with summary, open new
         if summary:
             set_topic_summary(db, most_recent["id"], summary)
-        title = entity_fingerprint(current_set) or "general"
+        shift = "SUBTOPIC" if ent_continues else "NEW"
+        title = entity_fingerprint(ent_set) or "general"
         tid = save_topic(db, window_id, title=title,
-                          start_message_id=new_start, end_message_id=new_end,
-                          tags=tags, entities=list(current_set))
-        return tid, "NEW", title
+                         start_message_id=new_start, end_message_id=new_end,
+                         tags=tags, entities=list(ent_set),
+                         categories=list(cat_set))
+        return tid, shift, title
 
 
 def print_turn(turn_num, user_msg, extracted, action, title, topic_id,
@@ -175,23 +189,32 @@ def print_turn(turn_num, user_msg, extracted, action, title, topic_id,
     return current_loaded
 
 
-def simulate_turn(db, window_id, user_msg, summary, turn_num, prev_loaded):
+def simulate_turn(db, window_id, user_msg, summary, turn_entities,
+                  turn_categories, turn_num, prev_loaded):
     # on_message: recall + TTL + active entities
+    # In real usage, recall extracts entities from the user message.
+    # Here we also accept speaker-provided entities (turn_entities)
+    # because the speaker sees full context and knows "what pattern?"
+    # is still about auth-session even when the user doesn't name it.
     result = recall(user_msg, db)
+    # Merge recall-extracted + speaker-provided entities
+    all_entities = sorted(set(result.entities) | set(turn_entities))
+
     matched_topic_ids = [t["id"] for t, _score in result.topics[:5]]
     tick_ttl(db, matched_topic_ids)
-    set_active_entities(db, result.entities)
 
-    # on_stop: group into topic row
+    # on_stop: group into topic row (two-axis: entity + category)
     tid, action, title = group_turn(db, window_id, user_msg,
-                                      result.entities, summary=summary)
+                                    all_entities, turn_categories,
+                                    summary=summary)
     mark_loaded(db, tid)
 
-    active = get_active_entities(db)
+    # Active entities derived from loaded topics (facts follow topics)
+    active = get_entities_from_loaded_topics(db)
     facts = get_facts_for_entities(db, [USER_ENTITY] + active)
     loaded = get_loaded_topics_with_ttl(db)
 
-    return print_turn(turn_num, user_msg, result.entities, action, title, tid,
+    return print_turn(turn_num, user_msg, all_entities, action, title, tid,
                        active, facts, loaded, prev_loaded, db)
 
 
@@ -212,54 +235,67 @@ def main():
     print("  auth-session, admin-dashboard, payment-webhook")
     print(f"\nDEFAULT_TTL = {DEFAULT_TTL} turns")
     print("\nWatch:")
-    print("  [NEW]    = first turn or disjoint entity set -> new topic row")
-    print("  [EXTEND] = entity overlap OR drift turn -> extends prior topic")
-    print("  [SWITCH] = entity hard-switch drops old facts, loads new")
+    print("  [NEW]      = disjoint entity set -> new domain")
+    print("  [SUBTOPIC] = same entities, different categories -> new sub-thread")
+    print("  [EXTEND]   = entity+category overlap OR drift -> extends current")
+    print("  [SWITCH]   = entity hard-switch drops old facts, loads new")
 
-    # Conversation (message, summary).
-    # Summary is only emitted on the TRANSITION turn — the one where the
-    # speaker is starting a new disjoint work area. It describes the PRIOR
-    # thread being closed.
+    # Conversation: (message, summary, speaker_entities, categories).
+    # Speaker entities = what the speaker would emit in turn.json (it sees
+    # full context and knows the topic even when user doesn't name it).
+    # Categories drive subtopic splits within the same entity domain.
     conversation = [
-        # Thread 1 — cpp + auth-session (extends through drift)
-        ("working on auth-session refactor in cpp at acme", ""),
-        ("what pattern should we use for session invalidation?", ""),
-        ("do we have a test harness ready?", ""),
-        ("ok proceed with the redesign", ""),
-        # HARD SWITCH -> new topic (python + admin-dashboard).
-        # Summary closes Thread 1.
-        ("actually let me check admin-dashboard in python first",
-         "auth-session refactor in cpp: picked version-counter + session "
-         "store pattern, no-exceptions policy applied via result types"),
-        ("where did we leave dark mode rollout?", ""),
-        ("push it to 100% tenants next sprint", ""),
-        # HARD SWITCH -> new topic. Summary closes Thread 2.
+        # Sub-thread 1: cpp auth-session ARCHITECTURE
+        ("working on auth-session refactor in cpp at acme",
+         "", ["cpp", "auth-session"], ["architecture"]),
+        ("what pattern should we use for session invalidation?",
+         "", ["cpp", "auth-session"], ["architecture"]),
+        ("do we have a test harness ready?",
+         "", ["cpp", "auth-session"], ["architecture"]),
+        # SUBTOPIC SHIFT: same entities, different category (architecture -> testing)
+        ("lets write unit tests for the session handler",
+         "auth-session architecture: picked version-counter + session store "
+         "pattern, no-exceptions via result types",
+         ["cpp", "auth-session"], ["testing"]),
+        ("mock the token store or use a real db?",
+         "", ["cpp", "auth-session"], ["testing"]),
+        # DOMAIN SHIFT: new entities entirely
+        ("actually let me check admin-dashboard in python",
+         "auth-session testing: mock token store, 3 test cases for "
+         "invalidation flow",
+         ["python", "admin-dashboard"], ["frontend"]),
+        ("where did we leave dark mode rollout?",
+         "", ["python", "admin-dashboard"], ["frontend"]),
+        # DOMAIN SHIFT: new entities
         ("now the payment-webhook postgres timeout is urgent",
-         "admin-dashboard: confirmed dark mode rollout push to 100% "
-         "planned for next sprint"),
-        ("query plan shows seq scan", ""),
-        ("add the index during sunday downtime window", ""),
-        # Drift — extends Thread 3
-        ("quiet moment", ""),
-        ("nothing else to report", ""),
+         "admin-dashboard: dark mode at 60%, push to 100% next sprint",
+         ["postgres", "payment-webhook"], ["database"]),
+        ("query plan shows seq scan",
+         "", ["postgres", "payment-webhook"], ["database"]),
+        # Drift — extends current thread
+        ("quiet moment", "", [], []),
+        ("nothing else to report", "", [], []),
     ]
 
     prev_loaded = set()
-    for i, (msg, summary) in enumerate(conversation, 1):
-        prev_loaded = simulate_turn(db, window, msg, summary, i, prev_loaded)
+    for i, (msg, summary, ents, cats) in enumerate(conversation, 1):
+        prev_loaded = simulate_turn(db, window, msg, summary, ents, cats,
+                                    i, prev_loaded)
 
     # Print final topic inventory
     print("\n" + "=" * 60)
     print(" Final topic inventory (what got stored)")
     print("=" * 60)
     rows = db.execute(
-        "SELECT title, entity_fingerprint, start_message_id, end_message_id, "
+        "SELECT title, entity_fingerprint, category_fingerprint, "
+        "start_message_id, end_message_id, "
         "substr(summary, 1, 60) as sum_snippet FROM topics "
         "ORDER BY start_message_id"
     ).fetchall()
     for r in rows:
         span = r["end_message_id"] - r["start_message_id"] + 1
-        print(f"  * {r['entity_fingerprint']}  (spans {span} messages)")
+        cats = r["category_fingerprint"] or "(none)"
+        print(f"  * {r['entity_fingerprint']}  |  cats: {cats}  ({span} msgs)")
         if r["sum_snippet"]:
             print(f"    summary: {r['sum_snippet']}...")
     print(f"\n  {len(rows)} topic rows for {len(conversation)} turns")

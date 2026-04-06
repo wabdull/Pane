@@ -7,9 +7,11 @@ from pane.schema import (
     create_window,
     entity_fingerprint,
     extend_topic,
+    get_entities_from_loaded_topics,
     get_most_recent_topic,
     get_topic_messages,
     get_topics_by_tags,
+    mark_loaded,
     parse_fingerprint,
     save_messages,
     save_topic,
@@ -233,6 +235,161 @@ def test_topics_ranked_by_recency_on_tiebreak(db):
 
 
 # ── overlap logic (integration with topic decision) ──────────
+
+# ── Two-axis grouping (entity + category) ────────────────────
+
+def test_save_topic_stores_category_fingerprint(db):
+    window = create_window(db)
+    m = save_messages(db, window, [{"role": "user", "content": "x"}])
+    save_topic(db, window, "T", m[0][0], m[0][0],
+               entities=["cpp"], categories=["architecture", "backend"])
+    t = get_most_recent_topic(db)
+    assert t["category_fingerprint"] == "architecture,backend"
+
+
+def test_extend_topic_merges_categories(db):
+    window = create_window(db)
+    m = save_messages(db, window, [{"role": "user", "content": "x"}])
+    tid = save_topic(db, window, "T", m[0][0], m[0][0],
+                     entities=["cpp"], categories=["architecture"])
+    m2 = save_messages(db, window, [{"role": "user", "content": "y"}])
+    extend_topic(db, tid, new_end_message_id=m2[0][0],
+                 new_categories=["testing"])
+    t = get_most_recent_topic(db)
+    assert parse_fingerprint(t["category_fingerprint"]) == {"architecture", "testing"}
+
+
+def test_subtopic_shift_same_entities_different_categories(db):
+    """Same entity overlap + different categories = subtopic shift (new row)."""
+    window = create_window(db)
+    m = save_messages(db, window, [{"role": "user", "content": "x"}])
+    save_topic(db, window, "T1", m[0][0], m[0][0],
+               entities=["cpp"], categories=["architecture"])
+
+    prior = get_most_recent_topic(db)
+    prior_ent = parse_fingerprint(prior["entity_fingerprint"])
+    prior_cat = parse_fingerprint(prior["category_fingerprint"])
+
+    new_ent = {"cpp"}  # overlap
+    new_cat = {"testing"}  # no overlap
+
+    ent_continues = bool(new_ent & prior_ent)
+    cat_continues = bool(new_cat & prior_cat)
+
+    assert ent_continues is True  # same domain
+    assert cat_continues is False  # different sub-thread
+
+
+def test_same_entities_same_categories_extends(db):
+    """Both axes overlap = extend."""
+    window = create_window(db)
+    m = save_messages(db, window, [{"role": "user", "content": "x"}])
+    save_topic(db, window, "T1", m[0][0], m[0][0],
+               entities=["cpp"], categories=["architecture"])
+
+    prior = get_most_recent_topic(db)
+    prior_ent = parse_fingerprint(prior["entity_fingerprint"])
+    prior_cat = parse_fingerprint(prior["category_fingerprint"])
+
+    new_ent = {"cpp"}
+    new_cat = {"architecture"}
+
+    assert bool(new_ent & prior_ent) is True
+    assert bool(new_cat & prior_cat) is True
+
+
+def test_empty_entity_set_treated_as_continuation(db):
+    """Empty entities this turn = 'no change' on entity axis."""
+    window = create_window(db)
+    m = save_messages(db, window, [{"role": "user", "content": "x"}])
+    save_topic(db, window, "T1", m[0][0], m[0][0],
+               entities=["cpp"], categories=["architecture"])
+
+    prior = get_most_recent_topic(db)
+    prior_ent = parse_fingerprint(prior["entity_fingerprint"])
+
+    new_ent = set()  # empty = user didn't name an entity
+    # "not new_ent" is True, so ent_continues = True
+    ent_continues = not new_ent or bool(new_ent & prior_ent)
+    assert ent_continues is True
+
+
+def test_empty_category_set_treated_as_continuation(db):
+    """Empty categories this turn = 'no change' on category axis."""
+    window = create_window(db)
+    m = save_messages(db, window, [{"role": "user", "content": "x"}])
+    save_topic(db, window, "T1", m[0][0], m[0][0],
+               entities=["cpp"], categories=["architecture"])
+
+    prior = get_most_recent_topic(db)
+    prior_cat = parse_fingerprint(prior["category_fingerprint"])
+
+    new_cat = set()
+    cat_continues = not new_cat or bool(new_cat & prior_cat)
+    assert cat_continues is True
+
+
+# ── get_entities_from_loaded_topics ───────────────────────────
+
+def test_entities_derived_from_loaded_topics(db):
+    """Active entities = union of fingerprints across loaded topics."""
+    window = create_window(db)
+    m = save_messages(db, window, [{"role": "user", "content": "x"}])
+    t1 = save_topic(db, window, "T1", m[0][0], m[0][0],
+                     entities=["cpp", "auth-session"])
+    m = save_messages(db, window, [{"role": "user", "content": "y"}])
+    t2 = save_topic(db, window, "T2", m[0][0], m[0][0],
+                     entities=["postgres", "payment-webhook"])
+    mark_loaded(db, t1)
+    mark_loaded(db, t2)
+    active = get_entities_from_loaded_topics(db)
+    assert set(active) == {"cpp", "auth-session", "postgres", "payment-webhook"}
+
+
+def test_entities_drop_when_topic_unloads(db):
+    """Unloading the only topic with cpp should drop cpp from active."""
+    window = create_window(db)
+    m = save_messages(db, window, [{"role": "user", "content": "x"}])
+    t1 = save_topic(db, window, "T1", m[0][0], m[0][0], entities=["cpp"])
+    m = save_messages(db, window, [{"role": "user", "content": "y"}])
+    t2 = save_topic(db, window, "T2", m[0][0], m[0][0], entities=["python"])
+    mark_loaded(db, t1)
+    mark_loaded(db, t2)
+    assert "cpp" in get_entities_from_loaded_topics(db)
+
+    # Unload t1 (cpp)
+    db.execute("DELETE FROM loaded_topics WHERE topic_id = ?", (t1,))
+    db.commit()
+    active = get_entities_from_loaded_topics(db)
+    assert "cpp" not in active
+    assert "python" in active
+
+
+def test_shared_entity_survives_partial_unload(db):
+    """If two subtopics share cpp, unloading one keeps cpp active."""
+    window = create_window(db)
+    m = save_messages(db, window, [{"role": "user", "content": "x"}])
+    t1 = save_topic(db, window, "S1", m[0][0], m[0][0],
+                     entities=["cpp", "auth-session"], categories=["architecture"])
+    m = save_messages(db, window, [{"role": "user", "content": "y"}])
+    t2 = save_topic(db, window, "S2", m[0][0], m[0][0],
+                     entities=["cpp", "auth-session"], categories=["testing"])
+    mark_loaded(db, t1)
+    mark_loaded(db, t2)
+
+    # Unload first subtopic
+    db.execute("DELETE FROM loaded_topics WHERE topic_id = ?", (t1,))
+    db.commit()
+    active = get_entities_from_loaded_topics(db)
+    assert "cpp" in active  # survived via t2
+    assert "auth-session" in active
+
+
+def test_no_loaded_topics_means_no_active_entities(db):
+    assert get_entities_from_loaded_topics(db) == []
+
+
+# ── overlap logic (single-axis, original tests) ──────────────
 
 def test_overlap_detection_matches_prior(db):
     """Non-empty intersection with prior topic's fingerprint."""
