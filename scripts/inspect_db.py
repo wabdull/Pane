@@ -27,6 +27,14 @@ from pane.schema import (
 )
 
 
+def safe_print(s):
+    """Print with fallback for Windows console encoding issues."""
+    try:
+        print(s)
+    except UnicodeEncodeError:
+        print(s.encode("ascii", errors="replace").decode("ascii"))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Inspect a Pane database")
     parser.add_argument("db_path", help="path to pane.db")
@@ -58,9 +66,9 @@ def main():
             if tid == t["id"]:
                 is_loaded = f"  [TTL={ttl}]"
                 break
-        print(f"  {has_sum} {ent_fp:35s} | {cat_fp:20s} | {span:3d} msgs{is_loaded}")
+        safe_print(f"  {has_sum} {ent_fp:35s} | {cat_fp:20s} | {span:3d} msgs{is_loaded}")
         if t.get("summary") and args.messages:
-            print(f"    summary: {t['summary'][:80]}...")
+            safe_print(f"    summary: {t['summary'][:80]}...")
 
     # ── Loaded state ──────────────────────────────────────────
     print(f"\nLoaded: {len(loaded)} topics")
@@ -97,7 +105,7 @@ def main():
             total += len(kvs)
             print(f"  [{ent_name}]")
             for k, v in kvs:
-                print(f"    {k}: {v}")
+                safe_print(f"    {k}: {v}")
         print(f"  Total: {total} facts")
     else:
         # Just show counts
