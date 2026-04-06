@@ -90,7 +90,32 @@ def main():
         set_active_entities(db, result.entities)
     active = get_active_entities(db)
 
-    # User facts always load. Active entity facts load on top.
+    # ── Facts loading ──────────────────────────────────────────
+    #
+    # CURRENT: all user-entity facts load unconditionally every turn.
+    # Active entity facts (cpp, postgres, etc.) load via hard-switch.
+    #
+    # FUTURE (two-tier, not category-scoped):
+    #
+    #   Tier 1 — Identity (always loaded, ~100-200 tokens):
+    #     name, role, timezone, team, preferences that affect every turn.
+    #     These are the "you know me" facts.
+    #
+    #   Tier 2 — Domain (loaded when relevant):
+    #     Programming prefs load when coding categories are active.
+    #     Personal facts load when conversation is casual / personal.
+    #     Project-specific facts are already scoped via entity hard-switch
+    #     (e.g. cpp.exceptions only loads when cpp is active).
+    #
+    # We're NOT implementing category-scoped facts yet — it would require
+    # the speaker to classify each fact at emission time (more tokens,
+    # more compliance risk). Instead we'll collect data via stats.json on
+    # how large the fact payload grows in real usage, and design the
+    # scoping from observed patterns rather than guesses.
+    #
+    # When user-entity facts grow past ~100 entries the two-tier split
+    # becomes worth building. Until then, loading all of them is fine
+    # (~750 tokens for 50 facts = 0.4% of a 200K window).
     facts = get_facts_for_entities(db, [USER_ENTITY] + active)
 
     # ── Build context block ─────────────────────────────────

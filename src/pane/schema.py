@@ -10,11 +10,12 @@ One DB per user. Seven tables:
   - active_entities: ephemeral hard-switch set — whose facts are loaded right now
 """
 
+import os
 import sqlite3
 import json
 import uuid
 
-DEFAULT_TTL = 5
+DEFAULT_TTL = int(os.environ.get("PANE_DEFAULT_TTL", "5"))
 USER_ENTITY = "user"  # facts attached here are always loaded
 
 
