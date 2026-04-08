@@ -259,9 +259,16 @@ def main():
                 save_entity(db, entity_name, entity_type="unknown",
                             aliases=[entity_name])
 
-    # Mark the (new or extended) topic as loaded — refreshes TTL.
-    # (All save_* helpers commit internally, no explicit commit needed.)
-    mark_loaded(db, topic_id)
+    # Reset TTL for the specific active topic. tick_ttl (in on_message)
+    # only decrements — it can't distinguish subtopics with shared entity
+    # tags. on_stop knows exactly which topic was extended/created, so
+    # resets belong here.
+    #
+    # - NEW topic: mark_loaded (just created, needs initial TTL)
+    # - Non-drift EXTEND: mark_loaded (user actively working on this)
+    # - Drift EXTEND: DON'T reset (gradual decay on silence)
+    if topic_action == "new" or (topic_action == "extend" and not is_drift):
+        mark_loaded(db, topic_id)
 
     tokens_stored = (len(user_msg) + len(assistant_msg)) // 4
     update_stats(

@@ -200,8 +200,7 @@ def simulate_turn(db, window_id, user_msg, summary, turn_entities,
     # Merge recall-extracted + speaker-provided entities
     all_entities = sorted(set(result.entities) | set(turn_entities))
 
-    matched_topic_ids = [t["id"] for t, _score in result.topics[:5]]
-    tick_ttl(db, matched_topic_ids)
+    tick_ttl(db)
 
     # on_stop: group into topic row (two-axis: entity + category)
     tid, action, title = group_turn(db, window_id, user_msg,

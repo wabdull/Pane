@@ -76,10 +76,10 @@ def main():
     result = recall(prompt, db)
 
     # ── Topics: TTL track ────────────────────────────────────
-    matched_topic_ids = []
-    if result.mode == "topic" and result.topics:
-        matched_topic_ids = [t["id"] for t, _score in result.topics[:5]]
-    tick_ttl(db, matched_topic_ids)
+    # tick_ttl only decrements. Resets come from on_stop after grouping
+    # identifies the specific active topic. This allows subtopics with
+    # shared entity tags to decay independently.
+    tick_ttl(db)
     loaded_topic_ids = get_loaded_topic_ids(db)
 
     # ── Entity facts: derived from loaded topics ──────────────

@@ -302,36 +302,19 @@ def create_window(db):
 
 # ── TTL / Loaded Topics ───────────────────────────────────────
 
-def tick_ttl(db, referenced_ids, max_ttl=DEFAULT_TTL):
+def tick_ttl(db):
     """Advance the loaded-topics clock by one turn.
 
-    Matched topics reset to max_ttl. All others decrement. Zero-TTL rows unload.
+    Decrements ALL loaded topics by 1 and removes any at TTL <= 0.
+    Does NOT reset any topics — resets come from on_stop's mark_loaded
+    after grouping identifies the specific active topic. This allows
+    subtopics with shared entity tags to decay independently.
+
     Returns the list of topic_ids still loaded, highest TTL first.
     """
-    referenced = [t for t in (referenced_ids or []) if t]
-
-    # Decrement non-matched rows first (so matched rows don't get double-hit)
-    if referenced:
-        placeholders = ",".join("?" for _ in referenced)
-        db.execute(
-            f"UPDATE loaded_topics SET ttl = ttl - 1 WHERE topic_id NOT IN ({placeholders})",
-            referenced
-        )
-    else:
-        db.execute("UPDATE loaded_topics SET ttl = ttl - 1")
-
-    # Reset / set matched topics to max_ttl
-    for tid in referenced:
-        db.execute(
-            "INSERT INTO loaded_topics (topic_id, ttl) VALUES (?, ?) "
-            "ON CONFLICT(topic_id) DO UPDATE SET ttl = excluded.ttl",
-            (tid, max_ttl)
-        )
-
-    # Unload expired
+    db.execute("UPDATE loaded_topics SET ttl = ttl - 1")
     db.execute("DELETE FROM loaded_topics WHERE ttl <= 0")
     db.commit()
-
     return get_loaded_topic_ids(db)
 
 

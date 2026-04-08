@@ -1,4 +1,8 @@
-"""Tests for TTL-based topic loading/unloading."""
+"""Tests for TTL-based topic loading/unloading.
+
+tick_ttl only decrements. Resets come from mark_loaded (called by on_stop
+after grouping identifies the specific active topic).
+"""
 
 import pytest
 
@@ -36,7 +40,7 @@ def test_mark_loaded_sets_max_ttl(db):
 
 def test_mark_loaded_resets_existing_ttl(db):
     mark_loaded(db, "topic-a")
-    tick_ttl(db, [])  # decrements to 4
+    tick_ttl(db)  # decrements to 4
     assert ttl_of(db, "topic-a") == DEFAULT_TTL - 1
     mark_loaded(db, "topic-a")
     assert ttl_of(db, "topic-a") == DEFAULT_TTL
@@ -47,37 +51,21 @@ def test_mark_loaded_respects_custom_ttl(db):
     assert ttl_of(db, "topic-a") == 3
 
 
-# ── tick_ttl: basic decrement ────────────────────────────────
+# ── tick_ttl: decrement-only ─────────────────────────────────
 
-def test_tick_decrements_unreferenced(db):
+def test_tick_decrements_all(db):
     mark_loaded(db, "topic-a")
-    tick_ttl(db, [])
+    mark_loaded(db, "topic-b")
+    tick_ttl(db)
     assert ttl_of(db, "topic-a") == DEFAULT_TTL - 1
+    assert ttl_of(db, "topic-b") == DEFAULT_TTL - 1
 
-
-def test_tick_resets_referenced(db):
-    mark_loaded(db, "topic-a")
-    tick_ttl(db, [])
-    tick_ttl(db, [])
-    assert ttl_of(db, "topic-a") == DEFAULT_TTL - 2
-    tick_ttl(db, ["topic-a"])
-    assert ttl_of(db, "topic-a") == DEFAULT_TTL
-
-
-def test_tick_loads_new_referenced_topic(db):
-    # A topic referenced for the first time should be loaded at max TTL
-    assert ttl_of(db, "topic-a") is None
-    tick_ttl(db, ["topic-a"])
-    assert ttl_of(db, "topic-a") == DEFAULT_TTL
-
-
-# ── tick_ttl: unload at zero ─────────────────────────────────
 
 def test_tick_unloads_at_zero(db):
     mark_loaded(db, "topic-a", max_ttl=2)
-    tick_ttl(db, [])  # 1
+    tick_ttl(db)  # 1
     assert ttl_of(db, "topic-a") == 1
-    tick_ttl(db, [])  # 0 → unloaded
+    tick_ttl(db)  # 0 → unloaded
     assert ttl_of(db, "topic-a") is None
 
 
@@ -85,86 +73,85 @@ def test_full_decay_cycle(db):
     """Load a topic, let it decay to zero over DEFAULT_TTL turns."""
     mark_loaded(db, "topic-a")
     for i in range(DEFAULT_TTL - 1):
-        tick_ttl(db, [])
+        tick_ttl(db)
         assert ttl_of(db, "topic-a") == DEFAULT_TTL - 1 - i
-    tick_ttl(db, [])  # final tick → unloaded
+    tick_ttl(db)  # final tick → unloaded
     assert ttl_of(db, "topic-a") is None
     assert get_loaded_topic_ids(db) == []
 
 
-def test_reference_prevents_decay(db):
-    """Repeatedly referenced topic stays loaded indefinitely."""
+# ── mark_loaded prevents decay ───────────────────────────────
+
+def test_mark_loaded_each_turn_prevents_decay(db):
+    """Simulates on_stop resetting the active topic each turn."""
     mark_loaded(db, "topic-a")
     for _ in range(50):
-        tick_ttl(db, ["topic-a"])
+        tick_ttl(db)
+        mark_loaded(db, "topic-a")  # on_stop resets active topic
     assert ttl_of(db, "topic-a") == DEFAULT_TTL
 
 
-# ── tick_ttl: mixed behavior ─────────────────────────────────
-
-def test_mixed_referenced_and_decaying(db):
-    """Referenced topic stays at max while unreferenced decrements."""
+def test_only_active_topic_survives(db):
+    """One topic gets mark_loaded each turn, the other decays."""
     mark_loaded(db, "topic-a")
     mark_loaded(db, "topic-b")
-    tick_ttl(db, ["topic-a"])
+    for _ in range(DEFAULT_TTL):
+        tick_ttl(db)
+        mark_loaded(db, "topic-a")  # only A is active
     assert ttl_of(db, "topic-a") == DEFAULT_TTL
-    assert ttl_of(db, "topic-b") == DEFAULT_TTL - 1
+    assert ttl_of(db, "topic-b") is None  # B decayed
 
+
+# ── topic switch scenario ────────────────────────────────────
 
 def test_topic_switch_scenario(db):
-    """Talk about A for 3 turns, then switch to B — A decays, B persists."""
-    # Turns 1-3: talking about A
+    """Talk about A, then switch to B — A decays, B persists."""
+    mark_loaded(db, "topic-a")
+    # Turns 1-3: working on A
     for _ in range(3):
-        tick_ttl(db, ["topic-a"])
+        tick_ttl(db)
+        mark_loaded(db, "topic-a")
     assert ttl_of(db, "topic-a") == DEFAULT_TTL
 
-    # Turns 4 through 4+DEFAULT_TTL: talking about B, A decays
-    for i in range(DEFAULT_TTL):
-        tick_ttl(db, ["topic-b"])
+    # Switch to B
+    mark_loaded(db, "topic-b")
+    # Turns 4 through 4+DEFAULT_TTL: working on B, A decays
+    for _ in range(DEFAULT_TTL):
+        tick_ttl(db)
+        mark_loaded(db, "topic-b")
     assert ttl_of(db, "topic-b") == DEFAULT_TTL
     assert ttl_of(db, "topic-a") is None  # A aged out
 
 
-def test_referenced_id_not_previously_loaded(db):
-    """A topic referenced for the first time loads without prior mark_loaded."""
-    tick_ttl(db, ["topic-a", "topic-b"])
-    assert ttl_of(db, "topic-a") == DEFAULT_TTL
-    assert ttl_of(db, "topic-b") == DEFAULT_TTL
+# ── edge cases ───────────────────────────────────────────────
 
-
-# ── tick_ttl: edge cases ─────────────────────────────────────
-
-def test_empty_loaded_set_with_empty_references(db):
-    """No-op: empty loaded, empty references. Should not crash."""
-    result = tick_ttl(db, [])
+def test_empty_loaded_set(db):
+    """No-op: empty loaded, just decrement nothing."""
+    result = tick_ttl(db)
     assert result == []
 
 
-def test_empty_loaded_set_with_new_reference(db):
-    """Empty loaded + one reference → loads that one."""
-    result = tick_ttl(db, ["topic-a"])
-    assert result == ["topic-a"]
-
-
-def test_none_referenced_ids(db):
-    """None should be handled as empty list."""
-    mark_loaded(db, "topic-a")
-    tick_ttl(db, None)
-    assert ttl_of(db, "topic-a") == DEFAULT_TTL - 1
-
-
-def test_duplicate_ids_in_referenced(db):
-    """Same id passed twice shouldn't break anything."""
-    tick_ttl(db, ["topic-a", "topic-a"])
-    assert ttl_of(db, "topic-a") == DEFAULT_TTL
+def test_none_handling(db):
+    """tick_ttl with empty DB should not crash."""
+    tick_ttl(db)
+    assert get_loaded_topic_ids(db) == []
 
 
 def test_get_loaded_topic_ids_ordered_by_ttl(db):
     """Highest TTL first."""
     mark_loaded(db, "topic-old")
-    tick_ttl(db, [])  # topic-old → 4
-    tick_ttl(db, [])  # topic-old → 3
+    tick_ttl(db)  # topic-old → 4
+    tick_ttl(db)  # topic-old → 3
     mark_loaded(db, "topic-new")  # topic-new → 5
     ids = get_loaded_topic_ids(db)
     assert ids[0] == "topic-new"
     assert ids[1] == "topic-old"
+
+
+def test_drift_causes_gradual_decay(db):
+    """If nothing calls mark_loaded (drift turns), topic decays."""
+    mark_loaded(db, "topic-a")
+    # Simulate 5 drift turns — no mark_loaded
+    for _ in range(DEFAULT_TTL):
+        tick_ttl(db)
+    assert ttl_of(db, "topic-a") is None
