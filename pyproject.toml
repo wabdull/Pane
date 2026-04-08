@@ -30,6 +30,7 @@ Issues = "https://github.com/wabdull/Pane/issues"
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 evals = ["anthropic>=0.40"]
+web = ["anthropic>=0.40", "fastapi>=0.110", "uvicorn>=0.29"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

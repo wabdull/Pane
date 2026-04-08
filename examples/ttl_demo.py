@@ -26,6 +26,7 @@ from pane.schema import (
     create_window,
     entity_fingerprint,
     extend_topic,
+    fingerprint_overlaps,
     get_entities_from_loaded_topics,
     get_facts_for_entities,
     get_loaded_topics_with_ttl,
@@ -107,20 +108,15 @@ def group_turn(db, window_id, user_msg, extracted_entities,
                      new_tags=tags)
         return most_recent["id"], "EXTEND", most_recent["title"]
 
-    prior_ent = parse_fingerprint(most_recent["entity_fingerprint"])
-    prior_cat = parse_fingerprint(most_recent["category_fingerprint"])
-
-    # Empty axis this turn = "no change" on that axis
-    ent_continues = not ent_set or bool(ent_set & prior_ent)
-    cat_continues = not cat_set or bool(cat_set & prior_cat)
+    ent_continues = fingerprint_overlaps(
+        ent_set, most_recent["entity_fingerprint"])
+    cat_continues = fingerprint_overlaps(
+        cat_set, most_recent["category_fingerprint"])
 
     if ent_continues and cat_continues:
-        merged_title = entity_fingerprint(prior_ent | ent_set) or \
-                       most_recent["title"]
         extend_topic(db, most_recent["id"], new_end_message_id=new_end,
-                     new_entities=list(ent_set), new_categories=list(cat_set),
-                     new_tags=tags, new_title=merged_title)
-        return most_recent["id"], "EXTEND", merged_title
+                     new_tags=tags)
+        return most_recent["id"], "EXTEND", most_recent["title"]
     else:
         if summary:
             set_topic_summary(db, most_recent["id"], summary)

@@ -15,7 +15,7 @@ import sqlite3
 import json
 import uuid
 
-DEFAULT_TTL = int(os.environ.get("PANE_DEFAULT_TTL", "5"))
+DEFAULT_TTL = int(os.environ.get("PANE_DEFAULT_TTL", "3"))
 USER_ENTITY = "user"  # facts attached here are always loaded
 
 
@@ -131,6 +131,23 @@ def parse_fingerprint(fp):
     return {x for x in (fp or "").split(",") if x}
 
 
+OVERLAP_THRESHOLD = 0.5  # majority of current entities must match
+
+
+def fingerprint_overlaps(current_set, prior_fingerprint_str):
+    """Check if current entities overlap enough with a topic's fixed fingerprint.
+    Returns True if >= 50% of current entities exist in the prior fingerprint.
+    Empty current set = drift (always returns True — no change on this axis).
+    """
+    if not current_set:
+        return True  # drift = no change
+    prior = parse_fingerprint(prior_fingerprint_str)
+    if not prior:
+        return False
+    overlap = len(current_set & prior) / len(current_set)
+    return overlap >= OVERLAP_THRESHOLD
+
+
 def save_topic(db, window_id, title, start_message_id, end_message_id,
                summary="", tags=None, entities=None, categories=None):
     """Store a topic with tags + entity/category fingerprints. Returns topic ID."""
@@ -172,8 +189,11 @@ def get_most_recent_topic(db):
 
 def extend_topic(db, topic_id, new_end_message_id, new_entities=None,
                  new_categories=None, new_tags=None, new_title=None):
-    """Extend an existing topic: push end_message_id forward, merge entities
-    and categories into their fingerprints, merge tags, optionally update title.
+    """Extend an existing topic: push end_message_id forward, merge tags.
+
+    Fingerprints (entity + category) are FIXED at creation — they represent
+    the topic's identity, not cumulative content. New entities/categories
+    go into topic_tags for retrieval but don't change the fingerprint.
     """
     current = db.execute(
         "SELECT entity_fingerprint, category_fingerprint FROM topics WHERE id = ?",
@@ -182,32 +202,16 @@ def extend_topic(db, topic_id, new_end_message_id, new_entities=None,
     if not current:
         return
 
-    merged_entities = parse_fingerprint(current["entity_fingerprint"])
-    for e in (new_entities or []):
-        n = (e or "").lower().strip()
-        if n:
-            merged_entities.add(n)
-
-    merged_cats = parse_fingerprint(current["category_fingerprint"])
-    for c in (new_categories or []):
-        n = (c or "").lower().strip()
-        if n:
-            merged_cats.add(n)
-
-    ent_fp = entity_fingerprint(merged_entities)
-    cat_fp = entity_fingerprint(merged_cats)
-
+    # Fingerprints stay fixed — only update end_message_id and optionally title
     if new_title is not None:
         db.execute(
-            "UPDATE topics SET end_message_id = ?, entity_fingerprint = ?, "
-            "category_fingerprint = ?, title = ? WHERE id = ?",
-            (new_end_message_id, ent_fp, cat_fp, new_title, topic_id)
+            "UPDATE topics SET end_message_id = ?, title = ? WHERE id = ?",
+            (new_end_message_id, new_title, topic_id)
         )
     else:
         db.execute(
-            "UPDATE topics SET end_message_id = ?, entity_fingerprint = ?, "
-            "category_fingerprint = ? WHERE id = ?",
-            (new_end_message_id, ent_fp, cat_fp, topic_id)
+            "UPDATE topics SET end_message_id = ? WHERE id = ?",
+            (new_end_message_id, topic_id)
         )
 
     for tag in (new_tags or []):

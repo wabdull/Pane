@@ -15,9 +15,9 @@ from pane.schema import (
     create_window,
     entity_fingerprint,
     extend_topic,
+    fingerprint_overlaps,
     get_most_recent_topic,
     mark_loaded,
-    parse_fingerprint,
     save_entity,
     save_entity_fact,
     save_messages,
@@ -207,23 +207,19 @@ def main():
         topic_id = most_recent["id"]
         topic_action = "extend"
     else:
-        prior_ent = parse_fingerprint(most_recent["entity_fingerprint"])
-        prior_cat = parse_fingerprint(most_recent["category_fingerprint"])
-
-        # Empty axis this turn = "no change" on that axis, not "mismatched."
-        # User saying "what pattern?" without naming cpp is NOT a domain switch.
-        ent_continues = not current_ent_set or bool(current_ent_set & prior_ent)
-        cat_continues = not current_cat_set or bool(current_cat_set & prior_cat)
+        # Overlap check against FIXED fingerprints (identity, not cumulative).
+        # Requires >= 50% of current entities to match the topic's fingerprint.
+        # Tags (cumulative) handle retrieval separately.
+        ent_continues = fingerprint_overlaps(
+            current_ent_set, most_recent["entity_fingerprint"])
+        cat_continues = fingerprint_overlaps(
+            current_cat_set, most_recent["category_fingerprint"])
 
         if ent_continues and cat_continues:
-            # Same sub-thread — extend
-            merged_title = entity_fingerprint(prior_ent | current_ent_set) or \
-                           most_recent["title"]
+            # Same sub-thread — extend (fingerprint stays fixed, tags grow)
             extend_topic(
                 db, most_recent["id"], new_end_message_id=new_end,
-                new_entities=list(current_ent_set),
-                new_categories=list(current_cat_set),
-                new_tags=tags, new_title=merged_title,
+                new_tags=tags,
             )
             topic_id = most_recent["id"]
             topic_action = "extend"

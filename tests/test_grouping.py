@@ -110,7 +110,8 @@ def test_extend_topic_updates_end_range(db):
     assert t["end_message_id"] == m2[0][0]
 
 
-def test_extend_topic_merges_entities(db):
+def test_extend_topic_keeps_fingerprint_fixed(db):
+    """Fingerprints are fixed at creation — extend doesn't change them."""
     window = create_window(db)
     m = save_messages(db, window, [{"role": "user", "content": "x"}])
     tid = save_topic(db, window, "T", m[0][0], m[0][0], entities=["cpp"])
@@ -120,9 +121,8 @@ def test_extend_topic_merges_entities(db):
                  new_entities=["python", "auth-session"])
 
     t = get_most_recent_topic(db)
-    assert parse_fingerprint(t["entity_fingerprint"]) == {
-        "cpp", "python", "auth-session"
-    }
+    # Fingerprint stays as creation-time entities only
+    assert parse_fingerprint(t["entity_fingerprint"]) == {"cpp"}
 
 
 def test_extend_topic_is_idempotent_on_existing_entity(db):
@@ -247,7 +247,8 @@ def test_save_topic_stores_category_fingerprint(db):
     assert t["category_fingerprint"] == "architecture,backend"
 
 
-def test_extend_topic_merges_categories(db):
+def test_extend_topic_keeps_category_fingerprint_fixed(db):
+    """Category fingerprints are fixed at creation too."""
     window = create_window(db)
     m = save_messages(db, window, [{"role": "user", "content": "x"}])
     tid = save_topic(db, window, "T", m[0][0], m[0][0],
@@ -256,7 +257,7 @@ def test_extend_topic_merges_categories(db):
     extend_topic(db, tid, new_end_message_id=m2[0][0],
                  new_categories=["testing"])
     t = get_most_recent_topic(db)
-    assert parse_fingerprint(t["category_fingerprint"]) == {"architecture", "testing"}
+    assert parse_fingerprint(t["category_fingerprint"]) == {"architecture"}
 
 
 def test_subtopic_shift_same_entities_different_categories(db):
