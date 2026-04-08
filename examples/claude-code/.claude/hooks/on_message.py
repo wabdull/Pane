@@ -20,6 +20,7 @@ from pane.schema import (
     get_facts_for_entities,
     get_loaded_topic_ids,
     get_loaded_topics_with_ttl,
+    soft_load_recalled,
     tick_ttl,
 )
 from pane.recall import recall, load_context, format_facts
@@ -77,9 +78,17 @@ def main():
 
     # ── Topics: TTL track ────────────────────────────────────
     # tick_ttl only decrements. Resets come from on_stop after grouping
-    # identifies the specific active topic. This allows subtopics with
-    # shared entity tags to decay independently.
+    # identifies the specific active topic.
     tick_ttl(db)
+
+    # Soft-load any recall-matched topics not already loaded (cross-session
+    # reload). Sets TTL=1 — visible this turn, decays next unless on_stop
+    # confirms via mark_loaded.
+    matched_topic_ids = [t["id"] for t, _ in result.topics[:5]] \
+        if result.topics else []
+    if matched_topic_ids:
+        soft_load_recalled(db, matched_topic_ids)
+
     loaded_topic_ids = get_loaded_topic_ids(db)
 
     # ── Entity facts: derived from loaded topics ──────────────

@@ -322,6 +322,46 @@ def tick_ttl(db):
     return get_loaded_topic_ids(db)
 
 
+def soft_load_recalled(db, topic_ids):
+    """Temporarily load recall-matched topics that aren't already loaded.
+    Sets TTL=1 (visible this turn only). on_stop's mark_loaded will
+    promote to full TTL if the topic is actively referenced.
+
+    Skips topics whose entity fingerprint is already covered by a loaded
+    topic — prevents re-loading a decayed subtopic when its sibling
+    (same entities, different category) is still active.
+    """
+    # Fingerprints already covered by loaded topics
+    loaded_fps = set()
+    for row in db.execute(
+        "SELECT t.entity_fingerprint FROM loaded_topics lt "
+        "JOIN topics t ON t.id = lt.topic_id"
+    ).fetchall():
+        loaded_fps.add(row["entity_fingerprint"])
+
+    for tid in (topic_ids or []):
+        existing = db.execute(
+            "SELECT ttl FROM loaded_topics WHERE topic_id = ?", (tid,)
+        ).fetchone()
+        if existing:
+            continue
+
+        # Don't soft-load if same fingerprint already loaded (subtopic sibling)
+        topic = db.execute(
+            "SELECT entity_fingerprint FROM topics WHERE id = ?", (tid,)
+        ).fetchone()
+        if topic and topic["entity_fingerprint"] in loaded_fps:
+            continue
+
+        db.execute(
+            "INSERT INTO loaded_topics (topic_id, ttl) VALUES (?, 1)",
+            (tid,)
+        )
+        if topic:
+            loaded_fps.add(topic["entity_fingerprint"])
+    db.commit()
+
+
 def mark_loaded(db, topic_id, max_ttl=DEFAULT_TTL):
     """Explicitly load a topic into the context window (TTL = max_ttl)."""
     db.execute(

@@ -291,6 +291,14 @@ async def chat(request: Request):
     # 1. Tick TTL
     tick_ttl(db)
 
+    # 1b. Soft-load recalled topics (cross-session reload)
+    from pane.recall import recall as _recall
+    from pane.schema import soft_load_recalled
+    _result = _recall(user_msg, db)
+    _matched = [t["id"] for t, _ in _result.topics[:5]] if _result.topics else []
+    if _matched:
+        soft_load_recalled(db, _matched)
+
     # 2. Build managed context
     memory_block = build_context(db)
 

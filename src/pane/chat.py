@@ -24,8 +24,8 @@ import re
 import sys
 from pathlib import Path
 
-# Fix Windows console encoding
-if sys.platform == "win32":
+# Fix Windows console encoding (only when running directly, not under pytest)
+if sys.platform == "win32" and "pytest" not in sys.modules:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8",
                                   errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8",
@@ -61,6 +61,7 @@ from pane.schema import (
     save_messages,
     save_topic,
     set_topic_summary,
+    soft_load_recalled,
     tick_ttl,
 )
 from pane.recall import recall, load_context, format_facts
@@ -293,6 +294,13 @@ def main():
 
         # 1. Tick TTL (decrement all)
         tick_ttl(db)
+
+        # 1b. Soft-load recalled topics (cross-session reload)
+        from pane.recall import recall as _recall
+        _result = _recall(user_input, db)
+        _matched = [t["id"] for t, _ in _result.topics[:5]] if _result.topics else []
+        if _matched:
+            soft_load_recalled(db, _matched)
 
         # 2. Build managed context
         memory_block = build_context(db)
