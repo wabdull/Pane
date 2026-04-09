@@ -457,6 +457,8 @@ def main():
         turn_data.append({
             "turn": i,
             "domain": domain,
+            "user_message": user_msg,
+            "assistant_response": clean_text,
             "action": action,
             "in_tokens": in_tok,
             "out_tokens": out_tok,
@@ -543,6 +545,22 @@ def main():
             "actions": actions,
             "turn_data": turn_data,
         }
+        # Readable chat log
+        log_path = save_dir / "tier3_chat.md"
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(f"# Tier 3 Chat Log — {completed} turns\n\n")
+            f.write(f"Model: {args.model}\n\n---\n\n")
+            for td in turn_data:
+                f.write(f"### Turn {td['turn']} — {td['domain']}\n\n")
+                f.write(f"**You:** {td['user_message']}\n\n")
+                f.write(f"**Claude:** {td['assistant_response']}\n\n")
+                f.write(f"*[{td['action']}] {td['in_tokens']:,} in / "
+                        f"{td['out_tokens']:,} out | "
+                        f"pane: {td['pane_context_tokens']:,} | "
+                        f"notional: {td['notional_tokens']:,} | "
+                        f"saving: {td['saving_pct']}%*\n\n---\n\n")
+        print(f"  Chat log saved to {log_path}")
+
         json_path = save_dir / "tier3_summary.json"
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
