@@ -8,7 +8,7 @@ Built by [Waleed Abdullah](https://github.com/wabdull) | [github.com/wabdull/Pan
 
 ## The Problem
 
-Without context management, every turn re-sends the entire conversation history. Input cost grows **quadratically** with session length. A 200-turn conversation burns 10M+ input tokens — most of it irrelevant context the model has to attend to.
+Without context management, every turn re-sends the entire conversation history. Per-turn input grows **linearly** (turn 200 sends ~98K tokens), but total session cost grows **quadratically** (the sum of all those growing turns = 10M+ input tokens). Most of it is irrelevant context the model has to attend to.
 
 ## The Solution
 
@@ -25,7 +25,7 @@ Pane manages the context window. Topics load on demand, decay via TTL when unref
 | Context at turn 200 | 97,769 tokens | 6,318 tokens |
 | **Total savings** | — | **85% tokens, 81% cost** |
 
-Context stays bounded at 3K-12K tokens regardless of conversation length. Without Pane, it grows linearly to 98K by turn 200.
+Per-turn context stays bounded at 3K-12K tokens regardless of conversation length. Without Pane, per-turn context grows linearly to 98K by turn 200 — and you pay for that growing context on every single turn.
 
 ### Savings over session length
 
