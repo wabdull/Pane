@@ -36,7 +36,7 @@ Context stays bounded at 3K-12K tokens regardless of conversation length. Withou
 | 100 | 4,956 | 49,842 | 90% |
 | 200 | 6,318 | 97,769 | 94% |
 
-The gap only widens. A 400-turn session would cost ~$6 with Pane vs ~$120+ without.
+The gap only widens. A 400-turn session would cost ~$12 with Pane vs ~$122 without (90% savings).
 
 ## Quality
 
